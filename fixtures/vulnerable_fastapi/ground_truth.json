@@ -1,0 +1,92 @@
+[
+  {
+    "method": "GET",
+    "path": "/ping/{host}",
+    "vulnerable": true,
+    "cwe": "CWE-78",
+    "sink_type": "command_execution",
+    "source_type": "path",
+    "safe_counterpart": "/ping-safe/{host}"
+  },
+  {
+    "method": "GET",
+    "path": "/ping-safe/{host}",
+    "vulnerable": false,
+    "cwe": "CWE-78",
+    "sink_type": "command_execution",
+    "source_type": "path",
+    "safe_counterpart": null
+  },
+  {
+    "method": "POST",
+    "path": "/calc",
+    "vulnerable": true,
+    "cwe": "CWE-95",
+    "sink_type": "dynamic_evaluation",
+    "source_type": "body",
+    "safe_counterpart": "/calc-safe"
+  },
+  {
+    "method": "POST",
+    "path": "/calc-safe",
+    "vulnerable": false,
+    "cwe": "CWE-95",
+    "sink_type": "dynamic_evaluation",
+    "source_type": "body",
+    "safe_counterpart": null
+  },
+  {
+    "method": "GET",
+    "path": "/profile",
+    "vulnerable": true,
+    "cwe": "CWE-502",
+    "sink_type": "unsafe_deserialization",
+    "source_type": "cookie",
+    "safe_counterpart": "/profile-safe"
+  },
+  {
+    "method": "GET",
+    "path": "/profile-safe",
+    "vulnerable": false,
+    "cwe": "CWE-502",
+    "sink_type": "unsafe_deserialization",
+    "source_type": "cookie",
+    "safe_counterpart": null
+  },
+  {
+    "method": "GET",
+    "path": "/files",
+    "vulnerable": true,
+    "cwe": "CWE-22",
+    "sink_type": "path_traversal",
+    "source_type": "query",
+    "safe_counterpart": "/files-safe"
+  },
+  {
+    "method": "GET",
+    "path": "/files-safe",
+    "vulnerable": false,
+    "cwe": "CWE-22",
+    "sink_type": "path_traversal",
+    "source_type": "query",
+    "safe_counterpart": null
+  },
+  {
+    "method": "GET",
+    "path": "/users/search",
+    "vulnerable": true,
+    "cwe": "CWE-89",
+    "sink_type": "sql_injection",
+    "source_type": "query",
+    "safe_counterpart": "/users/search-safe"
+  },
+  {
+    "method": "GET",
+    "path": "/users/search-safe",
+    "vulnerable": false,
+    "cwe": "CWE-89",
+    "sink_type": "sql_injection",
+    "source_type": "query",
+    "safe_counterpart": null
+  }
+]
