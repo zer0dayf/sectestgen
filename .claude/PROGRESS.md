@@ -26,10 +26,16 @@ deadline/deliverable özeti burada.
 - 2026-09-22 — GitHub'a pushlandı: https://github.com/zer0dayf/sectestgen (master).
 - 2026-09-22 — Proposal/final-report .docx dosyaları repodan çıkarıldı (gitignore),
   commit'lere AI co-author satırı eklenmemesi kararlaştırıldı.
+- 2026-09-22 — Kasıtlı zafiyetli FastAPI fixture'ı yazıldı
+  (`fixtures/vulnerable_fastapi/app.py`): proposal'daki 5 sink kategorisinin
+  (CWE-78 command execution, CWE-95 dynamic eval, CWE-502 unsafe deserialization,
+  CWE-22 path traversal, CWE-89 SQL injection) her biri için bir VULNERABLE + bir
+  SAFE endpoint, makine-okunur ground truth (`ground_truth.json`), ve her ikisinin
+  de gerçekten çalıştığını/engellendiğini kanıtlayan 17 test
+  (`tests/test_vulnerable_fixture.py`, hepsi geçiyor).
 
 ## Yapılacaklar (sıradaki adımlar, WP1 — 2026-10-18)
 
-- [ ] Kasıtlı zafiyetli minimal FastAPI fixture (test hedefi olarak)
 - [ ] `StaticAnalyzerAdapter` → Semgrep implementasyonu (JSON çıktısını `Finding`'e çevir)
 - [ ] `StaticAnalyzerAdapter` → Bandit implementasyonu
 - [ ] `FrameworkAdapter` → FastAPI route/user-input source keşfi

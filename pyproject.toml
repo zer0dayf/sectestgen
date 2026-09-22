@@ -10,7 +10,12 @@ requires-python = ">=3.11"
 readme = "README.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+]
 
 [project.scripts]
 sectestgen = "sectestgen.cli:main"
@@ -20,3 +25,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
