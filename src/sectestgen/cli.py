@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import argparse
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+
+from sectestgen.pipeline import run_static_pipeline
 
 
 def _version() -> str:
@@ -29,9 +32,15 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     static_parser = subparsers.add_parser(
-        "static", help="Static-code finding validation pipeline (Semgrep/Bandit/CodeQL)."
+        "static", help="Static-code finding validation pipeline (Semgrep/Bandit) -> Report 1."
     )
     static_parser.add_argument("target", help="Path to the FastAPI project to analyze.")
+    static_parser.add_argument(
+        "-o",
+        "--output",
+        default="sectestgen-out",
+        help="Directory to write report1.json / report1.html into (default: ./sectestgen-out).",
+    )
 
     sca_parser = subparsers.add_parser(
         "sca", help="SBOM/dependency exposure validation pipeline."
@@ -46,7 +55,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "static":
-        print(f"[static] pipeline not implemented yet (WP1). target={args.target}")
+        result = run_static_pipeline(Path(args.target), output_dir=Path(args.output))
+        for analyzer_error in result.errors:
+            print(f"[static] analyzer error: {analyzer_error}")
+        counts = result.counts_by_classification()
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "no findings"
+        print(f"[static] {len(result.findings)} finding(s) ({summary})")
+        print(f"[static] Report 1: {result.report_json}, {result.report_html}")
         return 0
     if args.command == "sca":
         print(f"[sca] pipeline not implemented yet (WP2). sbom={args.sbom}")

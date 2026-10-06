@@ -11,3 +11,4 @@ htmlcov/
 *.docx#
 ~$*
 *.docx
+sectestgen-out/

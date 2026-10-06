@@ -41,6 +41,36 @@ Core lives in `src/sectestgen/core/`:
 New analyzer/framework/SCA-provider/reporter support = implement one
 interface. Never bend the core model to fit a new tool.
 
+### WP1 implementations (`src/sectestgen/adapters/`, done)
+
+- `semgrep_adapter.py` / `bandit_adapter.py` — shell out to the CLI tools
+  (must be on `PATH`), normalize to `Finding`. Sink type (`command_execution`
+  / `dynamic_evaluation` / `unsafe_deserialization` / `path_traversal` /
+  `sql_injection`) comes from `cwe_map.py`'s CWE→sink-type table; Bandit
+  test ids are checked first since Bandit's own CWE tag is occasionally
+  wrong (B307/eval is tagged CWE-78, not CWE-95).
+- `rules/semgrep/fastapi_security.yml` — this project's own rule pack
+  (the "project-specific FastAPI security rules" from the proposal),
+  used by default instead of Semgrep's `auto` registry config so the
+  pipeline is deterministic and works offline.
+- `fastapi_adapter.py` — AST-only route/source discovery: matches any
+  `@<obj>.<verb>("path")` decorator and locally-defined `BaseModel`
+  subclasses used as parameters. No code is imported or executed.
+- `reachability.py` — finds the function enclosing the reported sink line,
+  checks whether it's a discovered route, then does a single-function
+  taint pass (direct refs + one-hop `x = <tainted expr>` propagation).
+  `reachable=True/False/None`; `None` + route correlation found →
+  `POTENTIALLY_REACHABLE`, `None` + no route → `INCONCLUSIVE` (see
+  `classifier.py`). `CONFIRMED` is never assigned here — that needs
+  Docker sandbox runtime evidence (WP3, not built yet).
+- `reporter.py` — `JSONReporter`/`HTMLReporter`, both from the same
+  `Finding` list so they can't disagree. Wired together in `pipeline.py`
+  (`run_static_pipeline`), called from `cli.py`'s `static` subcommand.
+- Verified against `fixtures/vulnerable_fastapi/`: all 5 vulnerable
+  endpoints correctly resolve to `REACHABLE` with the right correlated
+  route/source (see `tests/test_reachability.py`,
+  `tests/test_fastapi_adapter.py`).
+
 ## Evidence schema (`Finding`)
 
 - `Classification`: `CONFIRMED`, `REACHABLE`, `POTENTIALLY_REACHABLE`,
