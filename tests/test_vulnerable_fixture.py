@@ -4,6 +4,7 @@ truth the WP1 static/reachability adapters will later be scored against.
 """
 
 import base64
+import os
 import pickle
 from urllib.parse import quote
 
@@ -24,7 +25,10 @@ def client():
 
 def test_ping_command_injection_executes_extra_command(client, tmp_path):
     marker = tmp_path / "pwned_cmd"
-    host = f"127.0.0.1; touch {marker}"
+    if os.name == "nt":
+        host = f"127.0.0.1 & type nul > {marker}"
+    else:
+        host = f"127.0.0.1; touch {marker}"
 
     client.get(f"/ping/{quote(host, safe='/')}")
 

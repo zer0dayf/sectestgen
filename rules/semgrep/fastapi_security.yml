@@ -1,0 +1,99 @@
+rules:
+  - id: sectestgen-os-command-injection
+    languages: [python]
+    severity: ERROR
+    message: >-
+      os.popen()/os.system() runs a shell command. If any part of the
+      argument is derived from unsanitized user input this is OS command
+      injection (CWE-78).
+    metadata:
+      cwe: ["CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"]
+      sink_type: command_execution
+      owasp: ["A03:2021 - Injection"]
+    patterns:
+      - pattern-either:
+          - pattern: os.popen(...)
+          - pattern: os.system(...)
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+
+  - id: sectestgen-dynamic-evaluation
+    languages: [python]
+    severity: ERROR
+    message: >-
+      eval()/exec() evaluates a string as code. If the string can be
+      influenced by request data this is dynamic code evaluation (CWE-95).
+    metadata:
+      cwe: ["CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')"]
+      sink_type: dynamic_evaluation
+      owasp: ["A03:2021 - Injection"]
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+
+  - id: sectestgen-unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: >-
+      pickle.loads()/pickle.load() deserializes arbitrary objects. Untrusted
+      input reaching this sink can execute arbitrary code (CWE-502).
+    metadata:
+      cwe: ["CWE-502: Deserialization of Untrusted Data"]
+      sink_type: unsafe_deserialization
+      owasp: ["A08:2021 - Software and Data Integrity Failures"]
+    patterns:
+      - pattern-either:
+          - pattern: pickle.loads(...)
+          - pattern: pickle.load(...)
+
+  - id: sectestgen-path-traversal
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A filesystem path built from a joined, unvalidated fragment is read
+      directly. If the fragment is user-controlled this is path traversal
+      (CWE-22) unless the resolved path is verified to stay inside the
+      intended base directory.
+    metadata:
+      cwe: ["CWE-22: Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"]
+      sink_type: path_traversal
+      owasp: ["A01:2021 - Broken Access Control"]
+    patterns:
+      - pattern-either:
+          - pattern: ($DIR / $FRAGMENT).read_text(...)
+          - pattern: ($DIR / $FRAGMENT).read_bytes(...)
+          - pattern: open($DIR / $FRAGMENT, ...)
+          - pattern: |
+              $TARGET = $DIR / $FRAGMENT
+              ...
+              $TARGET.read_text(...)
+          - pattern: |
+              $TARGET = $DIR / $FRAGMENT
+              ...
+              $TARGET.read_bytes(...)
+          - pattern: |
+              $TARGET = $DIR / $FRAGMENT
+              ...
+              open($TARGET, ...)
+
+  - id: sectestgen-sql-injection
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A SQL statement is built with string formatting/concatenation instead
+      of bound parameters. If any part comes from request data this is SQL
+      injection (CWE-89).
+    metadata:
+      cwe: ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"]
+      sink_type: sql_injection
+      owasp: ["A03:2021 - Injection"]
+    patterns:
+      - pattern-either:
+          - pattern: $CONN.execute(f"...")
+          - pattern: $CONN.execute(... % ...)
+          - pattern: $CONN.execute(... + ...)
+          - pattern: $CURSOR.execute(f"...")
+          - pattern: $CURSOR.execute(... % ...)
+          - pattern: $CURSOR.execute(... + ...)
