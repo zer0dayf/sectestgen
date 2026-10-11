@@ -1,0 +1,92 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/ping/{host}",
+    "vulnerable": true,
+    "cwe": "CWE-78",
+    "sink_type": "command_execution",
+    "source_type": "path",
+    "safe_counterpart": "/api/ping-safe/{host}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/ping-safe/{host}",
+    "vulnerable": false,
+    "cwe": "CWE-78",
+    "sink_type": "command_execution",
+    "source_type": "path",
+    "safe_counterpart": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/calc",
+    "vulnerable": true,
+    "cwe": "CWE-95",
+    "sink_type": "dynamic_evaluation",
+    "source_type": "body",
+    "safe_counterpart": "/api/calc-safe"
+  },
+  {
+    "method": "POST",
+    "path": "/api/calc-safe",
+    "vulnerable": false,
+    "cwe": "CWE-95",
+    "sink_type": "dynamic_evaluation",
+    "source_type": "body",
+    "safe_counterpart": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/profile",
+    "vulnerable": true,
+    "cwe": "CWE-502",
+    "sink_type": "unsafe_deserialization",
+    "source_type": "cookie",
+    "safe_counterpart": "/api/profile-safe"
+  },
+  {
+    "method": "GET",
+    "path": "/api/profile-safe",
+    "vulnerable": false,
+    "cwe": "CWE-502",
+    "sink_type": "unsafe_deserialization",
+    "source_type": "cookie",
+    "safe_counterpart": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/files",
+    "vulnerable": true,
+    "cwe": "CWE-22",
+    "sink_type": "path_traversal",
+    "source_type": "query",
+    "safe_counterpart": "/api/files-safe"
+  },
+  {
+    "method": "GET",
+    "path": "/api/files-safe",
+    "vulnerable": false,
+    "cwe": "CWE-22",
+    "sink_type": "path_traversal",
+    "source_type": "query",
+    "safe_counterpart": null
+  },
+  {
+    "method": "GET",
+    "path": "/users/search",
+    "vulnerable": true,
+    "cwe": "CWE-89",
+    "sink_type": "sql_injection",
+    "source_type": "query",
+    "safe_counterpart": "/users/search-safe"
+  },
+  {
+    "method": "GET",
+    "path": "/users/search-safe",
+    "vulnerable": false,
+    "cwe": "CWE-89",
+    "sink_type": "sql_injection",
+    "source_type": "query",
+    "safe_counterpart": null
+  }
+]
