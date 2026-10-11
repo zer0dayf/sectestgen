@@ -1,4 +1,4 @@
-"""JSON and HTML Reporters for Report 1 (static pipeline).
+"""JSON and HTML Reporters for Report 1 (static) and Report 2 (SCA).
 
 JSON is the canonical/machine-readable output; HTML is the human-readable
 view. Both consume the same `Finding` list so they can never disagree.
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterable
 
 from sectestgen.core.adapters import Reporter
-from sectestgen.core.models import Finding
+from sectestgen.core.models import Finding, Pipeline
 
 _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
@@ -25,29 +25,44 @@ class JSONReporter(Reporter):
         return output_path
 
 
+_STATIC_HEADERS = ["Tool", "Rule", "Severity", "Location", "Sink / Source", "Reachability", "Classification"]
+_SCA_HEADERS = ["Tool", "Advisory", "Severity", "Package", "Fixed in", "Usage evidence", "Classification"]
+_TITLES = {
+    Pipeline.STATIC: ("Report 1 (Static)", "Report 1 (Static Pipeline)"),
+    Pipeline.SCA: ("Report 2 (SCA)", "Report 2 (SCA Pipeline)"),
+}
+
+
 class HTMLReporter(Reporter):
+    def __init__(self, pipeline: Pipeline = Pipeline.STATIC) -> None:
+        self.pipeline = pipeline
+
     def generate(self, findings: Iterable[Finding], output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         rows = sorted(findings, key=lambda f: _SEVERITY_ORDER.get(f.severity.value, 9))
-        output_path.write_text(_render(rows), encoding="utf-8")
+        output_path.write_text(_render(rows, self.pipeline), encoding="utf-8")
         return output_path
 
 
-def _render(findings: list[Finding]) -> str:
+def _render(findings: list[Finding], pipeline: Pipeline) -> str:
     counts: dict[str, int] = {}
     for finding in findings:
         counts[finding.classification.value] = counts.get(finding.classification.value, 0) + 1
     summary = " &nbsp;·&nbsp; ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "no findings"
 
-    body_rows = "\n".join(_render_row(f) for f in findings) or (
-        '<tr><td colspan="7" class="empty">No findings.</td></tr>'
+    render_row = _render_sca_row if pipeline is Pipeline.SCA else _render_row
+    headers = _SCA_HEADERS if pipeline is Pipeline.SCA else _STATIC_HEADERS
+    header_cells = "".join(f"<th>{h}</th>" for h in headers)
+    page_title, heading = _TITLES[pipeline]
+    body_rows = "\n".join(render_row(f) for f in findings) or (
+        f'<tr><td colspan="{len(headers)}" class="empty">No findings.</td></tr>'
     )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SecTestGen — Report 1 (Static)</title>
+<title>SecTestGen — {page_title}</title>
 <style>
   body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; background: #fafafa; }}
   h1 {{ margin-bottom: 0.25rem; }}
@@ -68,14 +83,11 @@ def _render(findings: list[Finding]) -> str:
 </style>
 </head>
 <body>
-<h1>SecTestGen — Report 1 (Static Pipeline)</h1>
+<h1>SecTestGen — {heading}</h1>
 <p class="summary">{len(findings)} finding(s) &nbsp;·&nbsp; {summary}</p>
 <table>
 <thead>
-<tr>
-  <th>Tool</th><th>Rule</th><th>Severity</th><th>Location</th>
-  <th>Sink / Source</th><th>Reachability</th><th>Classification</th>
-</tr>
+<tr>{header_cells}</tr>
 </thead>
 <tbody>
 {body_rows}
@@ -104,6 +116,34 @@ def _render_row(finding: Finding) -> str:
         f"<td><code>{location}</code></td>"
         f"<td>{sink_source}</td>"
         f"<td>{reachable_label}<br><small>{notes}</small></td>"
+        f"<td class=\"cls-{finding.classification.value}\">{finding.classification.value}"
+        f"<br><small>confidence: {finding.confidence.value}</small></td>"
+        "</tr>"
+    )
+
+
+def _render_sca_row(finding: Finding) -> str:
+    usage = finding.raw.get("usage") or {}
+    advisory = finding.cve or finding.rule_id or finding.title
+    if finding.rule_id and finding.rule_id != advisory:
+        advisory = f"{advisory} ({finding.rule_id})"
+    also = finding.raw.get("also_reported_by") or []
+    tools = ", ".join([finding.tool, *also])
+    scope = {True: "direct", False: "transitive", None: "scope unknown"}[usage.get("direct")]
+    package = f"{finding.package_name}@{finding.package_version}<br><small><code>{html.escape(finding.purl or '-')}</code> · {scope}</small>"
+    evidence_lines = finding.reachability.path if finding.reachability else []
+    notes = html.escape(finding.reachability.notes or "") if finding.reachability else ""
+    evidence = "<br>".join(f"<code>{html.escape(line)}</code>" for line in evidence_lines)
+
+    return (
+        "<tr>"
+        f"<td>{html.escape(tools)}</td>"
+        f"<td><code>{html.escape(advisory)}</code></td>"
+        f"<td class=\"sev-{finding.severity.value}\">{finding.severity.value}</td>"
+        f"<td>{package}</td>"
+        f"<td>{html.escape(finding.fixed_version or '-')}</td>"
+        f"<td>{html.escape(usage.get('status', '-'))}<br><small>{notes}</small>"
+        f"{'<br>' + evidence if evidence else ''}</td>"
         f"<td class=\"cls-{finding.classification.value}\">{finding.classification.value}"
         f"<br><small>confidence: {finding.confidence.value}</small></td>"
         "</tr>"

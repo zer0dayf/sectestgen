@@ -1,27 +1,36 @@
-"""Static pipeline orchestration (WP1): Semgrep/Bandit -> FastAPI source/sink
-correlation -> bounded reachability -> classification -> Report 1.
+"""Pipeline orchestration.
 
-Kept separate from `cli.py` so the pipeline is testable without going
+- Static (WP1): Semgrep/Bandit -> FastAPI source/sink correlation ->
+  bounded reachability -> classification -> Report 1.
+- SCA (WP2): CycloneDX SBOM (+ embedded vulnerabilities) / Grype ->
+  de-duplication on purl + CVE -> Python/Java import-usage evidence ->
+  classification -> Report 2.
+
+Kept separate from `cli.py` so the pipelines are testable without going
 through argparse.
 """
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from sectestgen.adapters.bandit_adapter import BanditAdapter
-from sectestgen.adapters.classifier import DefaultClassifier
+from sectestgen.adapters.classifier import DefaultClassifier, SCAClassifier
+from sectestgen.adapters.cyclonedx import CycloneDXAdapter, load_sbom, normalize_purl
 from sectestgen.adapters.fastapi_adapter import FastAPIFrameworkAdapter
+from sectestgen.adapters.grype_adapter import GrypeAdapter
+from sectestgen.adapters.package_usage import ImportUsageReachabilityEngine
 from sectestgen.adapters.reachability import BoundedReachabilityEngine
 from sectestgen.adapters.reporter import HTMLReporter, JSONReporter
 from sectestgen.adapters.semgrep_adapter import SemgrepAdapter
-from sectestgen.core.adapters import StaticAnalyzerAdapter
-from sectestgen.core.models import Finding
+from sectestgen.core.adapters import SCAAdapter, StaticAnalyzerAdapter
+from sectestgen.core.models import Finding, Pipeline
 
 
 @dataclass
-class StaticPipelineResult:
+class PipelineResult:
     findings: list[Finding]
     routes: list[dict]
     report_json: Path | None = None
@@ -39,7 +48,7 @@ def run_static_pipeline(
     target: Path,
     output_dir: Path | None = None,
     analyzers: list[StaticAnalyzerAdapter] | None = None,
-) -> StaticPipelineResult:
+) -> PipelineResult:
     target = Path(target).resolve()
     analyzers = analyzers if analyzers is not None else [SemgrepAdapter(), BanditAdapter()]
 
@@ -59,7 +68,7 @@ def run_static_pipeline(
         reachability_engine.analyze(finding, target)
         classifier.classify(finding)
 
-    result = StaticPipelineResult(findings=findings, routes=routes, errors=errors)
+    result = PipelineResult(findings=findings, routes=routes, errors=errors)
 
     if output_dir is not None:
         output_dir = Path(output_dir)
@@ -67,3 +76,70 @@ def run_static_pipeline(
         result.report_html = HTMLReporter().generate(findings, output_dir / "report1.html")
 
     return result
+
+
+def run_sca_pipeline(
+    sbom: Path,
+    source: Path,
+    output_dir: Path | None = None,
+    grype_report: Path | None = None,
+    adapters: list[SCAAdapter] | None = None,
+) -> PipelineResult:
+    """`source` is the project the SBOM describes; it's only read, never run."""
+    sbom = Path(sbom).resolve()
+    source = Path(source).resolve()
+    if adapters is None:
+        adapters = [CycloneDXAdapter()]
+        if grype_report is not None or shutil.which("grype"):
+            adapters.append(GrypeAdapter(report=grype_report))
+
+    errors: list[str] = []
+    try:
+        sbom_index = load_sbom(sbom)
+    except (OSError, ValueError) as exc:
+        sbom_index = None
+        errors.append(f"SBOM: {exc}")
+
+    findings: list[Finding] = []
+    if sbom_index is not None:
+        for adapter in adapters:
+            try:
+                findings.extend(adapter.run(sbom))
+            except Exception as exc:  # noqa: BLE001 - one provider failing shouldn't sink the run
+                errors.append(f"{type(adapter).__name__}: {exc}")
+    findings = deduplicate_sca(findings)
+
+    routes = list(FastAPIFrameworkAdapter().discover_routes(source)) if source.exists() else []
+    usage_engine = ImportUsageReachabilityEngine(sbom_index, routes)
+    classifier = SCAClassifier()
+    for finding in findings:
+        usage_engine.analyze(finding, source)
+        classifier.classify(finding)
+
+    result = PipelineResult(findings=findings, routes=routes, errors=errors)
+
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        result.report_json = JSONReporter().generate(findings, output_dir / "report2.json")
+        result.report_html = HTMLReporter(Pipeline.SCA).generate(findings, output_dir / "report2.html")
+
+    return result
+
+
+def deduplicate_sca(findings: list[Finding]) -> list[Finding]:
+    """One finding per (package, advisory). The first provider's finding is
+    kept; later providers are recorded in raw["also_reported_by"] so the
+    provenance isn't lost. Advisories are matched on CVE when both sides
+    have one, else on the provider's own id."""
+    kept: dict[tuple[str, str], Finding] = {}
+    for finding in findings:
+        key = (normalize_purl(finding.purl or finding.package_name or ""), finding.cve or finding.rule_id or "")
+        existing = kept.get(key)
+        if existing is None:
+            kept[key] = finding
+            continue
+        also = existing.raw.setdefault("also_reported_by", [])
+        if finding.tool != existing.tool and finding.tool not in also:
+            also.append(finding.tool)
+        existing.fixed_version = existing.fixed_version or finding.fixed_version
+    return list(kept.values())

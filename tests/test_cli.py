@@ -29,3 +29,16 @@ def test_no_command_prints_help(capsys):
 
     assert exit_code == 0
     assert "usage" in captured.out.lower()
+
+
+def test_sca_pipeline_runs_against_java_fixture(tmp_path, capsys):
+    java = FIXTURE.parent / "sca_java"
+    exit_code = main(
+        ["sca", str(java / "sbom.cdx.json"), "--grype", str(java / "grype.json"), "-o", str(tmp_path)]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "[sca] 3 finding(s)" in captured.out
+    assert (tmp_path / "report2.json").exists()
+    assert (tmp_path / "report2.html").exists()

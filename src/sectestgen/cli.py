@@ -2,8 +2,8 @@
 
 Each subcommand maps to a pipeline described in the project proposal:
 `static` (Semgrep/Bandit/CodeQL -> reachability -> Report 1) and
-`sca` (CycloneDX/Dependency-Track/Snyk/Grype -> Report 2). They are stubs
-until the corresponding work package (WP1, WP2) is implemented.
+`sca` (CycloneDX/Dependency-Track/Grype -> import-usage evidence ->
+Report 2).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import argparse
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from sectestgen.pipeline import run_static_pipeline
+from sectestgen.pipeline import PipelineResult, run_sca_pipeline, run_static_pipeline
 
 
 def _version() -> str:
@@ -43,9 +43,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sca_parser = subparsers.add_parser(
-        "sca", help="SBOM/dependency exposure validation pipeline."
+        "sca", help="SBOM/dependency exposure validation pipeline (CycloneDX/Grype) -> Report 2."
     )
-    sca_parser.add_argument("sbom", help="Path to a CycloneDX SBOM file.")
+    sca_parser.add_argument("sbom", help="Path to a CycloneDX JSON SBOM.")
+    sca_parser.add_argument(
+        "-s",
+        "--source",
+        help="Project the SBOM describes, searched for imports (default: the SBOM's directory).",
+    )
+    sca_parser.add_argument(
+        "--grype",
+        help="Pre-generated Grype JSON report (default: run `grype` from PATH if installed).",
+    )
+    sca_parser.add_argument(
+        "-o",
+        "--output",
+        default="sectestgen-out",
+        help="Directory to write report2.json / report2.html into (default: ./sectestgen-out).",
+    )
 
     return parser
 
@@ -56,19 +71,30 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "static":
         result = run_static_pipeline(Path(args.target), output_dir=Path(args.output))
-        for analyzer_error in result.errors:
-            print(f"[static] analyzer error: {analyzer_error}")
-        counts = result.counts_by_classification()
-        summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "no findings"
-        print(f"[static] {len(result.findings)} finding(s) ({summary})")
-        print(f"[static] Report 1: {result.report_json}, {result.report_html}")
+        _print_summary("static", "Report 1", result)
         return 0
     if args.command == "sca":
-        print(f"[sca] pipeline not implemented yet (WP2). sbom={args.sbom}")
+        sbom = Path(args.sbom)
+        result = run_sca_pipeline(
+            sbom,
+            Path(args.source) if args.source else sbom.parent,
+            output_dir=Path(args.output),
+            grype_report=Path(args.grype) if args.grype else None,
+        )
+        _print_summary("sca", "Report 2", result)
         return 0
 
     parser.print_help()
     return 0
+
+
+def _print_summary(label: str, report: str, result: PipelineResult) -> None:
+    for error in result.errors:
+        print(f"[{label}] error: {error}")
+    counts = result.counts_by_classification()
+    summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "no findings"
+    print(f"[{label}] {len(result.findings)} finding(s) ({summary})")
+    print(f"[{label}] {report}: {result.report_json}, {result.report_html}")
 
 
 if __name__ == "__main__":
