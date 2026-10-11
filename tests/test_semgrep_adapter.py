@@ -1,6 +1,8 @@
+import io
 import json
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -89,35 +91,100 @@ def test_java_rules_flag_only_vulnerable_spring_endpoints(spring_findings):
     assert flagged == vulnerable
 
 
-def test_docker_runner_is_offline_read_only_and_maps_paths(monkeypatch, tmp_path):
+def _project(tmp_path: Path) -> tuple[Path, Path]:
     rules = tmp_path / "rules.yml"
     rules.write_text("rules: []\n", encoding="utf-8")
     target = tmp_path / "project"
-    target.mkdir()
-    calls = []
+    for rel in [
+        "pkg/A.java",
+        "app/main.py",
+        "README.md",
+        "target/classes/Gen.java",
+        ".git/hooks/x.py",
+        "node_modules/m/i.py",
+        "build/B.java",
+    ]:
+        path = target / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n", encoding="utf-8")
+    return rules, target
 
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        payload = {"results": [{"check_id": "rules0.sectestgen-x", "path": "/src/pkg/A.java",
-                                "start": {"line": 3}, "end": {"line": 3}, "extra": {}}]}
-        return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr("sectestgen.adapters.semgrep_adapter.subprocess.run", fake_run)
+class _FakeDocker:
+    """Records docker CLI calls; `start` returns one Semgrep result."""
+
+    def __init__(self, start_error: Exception | None = None):
+        self.calls: list[list[str]] = []
+        self.archive_names: list[str] = []
+        self.start_error = start_error
+
+    def __call__(self, cmd, **kwargs):
+        self.calls.append(cmd)
+        verb = cmd[1]
+        if verb == "cp":
+            with tarfile.open(fileobj=io.BytesIO(kwargs["stdin"].read())) as tar:
+                self.archive_names = sorted(tar.getnames())
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+        if verb == "start":
+            if self.start_error is not None:
+                raise self.start_error
+            payload = {"results": [{"check_id": "rules.0_rules.sectestgen-x", "path": "/src/pkg/A.java",
+                                    "start": {"line": 3}, "end": {"line": 3}, "extra": {}}]}
+            return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps(payload), stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    def verbs(self) -> list[str]:
+        return [c[1] for c in self.calls]
+
+
+def _use_fake_docker(monkeypatch, fake: _FakeDocker) -> None:
+    monkeypatch.setattr("sectestgen.adapters.semgrep_adapter.subprocess.run", fake)
     monkeypatch.setattr(
         "sectestgen.adapters.semgrep_adapter.shutil.which",
         lambda name: "/usr/bin/docker" if name == "docker" else None,
     )
 
+
+def test_docker_runner_copies_only_sources_and_runs_offline(monkeypatch, tmp_path):
+    rules, target = _project(tmp_path)
+    fake = _FakeDocker()
+    _use_fake_docker(monkeypatch, fake)
+
     adapter = SemgrepAdapter(config_paths=[rules])
     findings = list(adapter.run(target))
 
-    cmd = calls[0]
     assert adapter.used_runner == "docker"
-    assert cmd[cmd.index("--network") + 1] == "none"
-    assert f"{target.resolve()}:/src:ro" in cmd
-    assert f"{tmp_path.resolve()}:/rules0:ro" in cmd
+    assert fake.verbs() == ["create", "cp", "start", "rm"]
+    create = fake.calls[0]
+    assert create[create.index("--network") + 1] == "none"
+    assert not any(arg in ("-v", "--volume", "--mount") for arg in create)
+    assert fake.archive_names == ["rules/0_rules.yml", "src/app/main.py", "src/pkg/A.java"]
+    assert adapter.staged_files == 2
     assert findings[0].location.file_path == str(target.resolve() / "pkg" / "A.java")
     assert findings[0].rule_id == "sectestgen-x"
+
+
+def test_docker_runner_removes_container_on_timeout(monkeypatch, tmp_path):
+    rules, target = _project(tmp_path)
+    fake = _FakeDocker(start_error=subprocess.TimeoutExpired(cmd="docker start", timeout=1))
+    _use_fake_docker(monkeypatch, fake)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        list(SemgrepAdapter(config_paths=[rules]).run(target))
+
+    name = fake.calls[0][fake.calls[0].index("--name") + 1]
+    assert fake.calls[-1][1:] == ["rm", "--force", name]
+
+
+def test_docker_runner_skips_container_when_no_sources(monkeypatch, tmp_path):
+    rules = tmp_path / "rules.yml"
+    rules.write_text("rules: []\n", encoding="utf-8")
+    (tmp_path / "only.md").write_text("x\n", encoding="utf-8")
+    fake = _FakeDocker()
+    _use_fake_docker(monkeypatch, fake)
+
+    assert list(SemgrepAdapter(config_paths=[rules]).run(tmp_path)) == []
+    assert fake.calls == []
 
 
 def test_docker_runner_rejects_registry_configs(monkeypatch, tmp_path):

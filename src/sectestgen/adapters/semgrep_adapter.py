@@ -7,9 +7,11 @@ can be layered on by passing `config_paths` (local runner only).
 
 Runners:
   - "local"  — the `semgrep` binary on PATH.
-  - "docker" — the pinned `semgrep/semgrep` image, with `--network none`
-    and the target + rule files mounted read-only. Used where the native
-    binary can't run (e.g. blocked by Windows Application Control).
+  - "docker" — the pinned `semgrep/semgrep` image, with `--network none`.
+    The project's source files (see `iter_source_files`) and the rule files
+    are copied into the container, nothing is mounted from the host. Used
+    where the native binary can't run (e.g. blocked by Windows Application
+    Control).
   - "auto"   — local, falling back to docker if the binary is missing or
     can't be executed.
 """
@@ -17,10 +19,14 @@ Runners:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tarfile
+import tempfile
+import uuid
 from pathlib import Path, PurePosixPath
-from typing import Iterable, Sequence
+from typing import Iterable, Iterator, Sequence
 
 from sectestgen.adapters.cwe_map import sink_type_for_cwe_strings
 from sectestgen.core.adapters import StaticAnalyzerAdapter
@@ -34,6 +40,26 @@ _CONTAINER_SRC = PurePosixPath("/src")
 # prefixes local rule ids with a path-derived namespace that differs per
 # runner/cwd, so the id is normalized to start at this marker.
 _OWN_RULE_MARKER = "sectestgen-"
+# Languages the project's rule packs cover. Only these are copied into the
+# docker runner's container.
+SOURCE_EXTENSIONS = frozenset({".py", ".java"})
+# VCS metadata, dependency caches, virtualenvs and build output: never
+# first-party source, often huge.
+SKIPPED_DIRS = frozenset({
+    ".git", ".hg", ".svn", ".idea", ".vscode", ".gradle", ".mvn",
+    "node_modules", "target", "build", "dist", "out",
+    ".venv", "venv", "env", "__pycache__", ".mypy_cache", ".pytest_cache", ".tox",
+})
+
+
+def iter_source_files(root: Path) -> Iterator[Path]:
+    """Source files under `root` the docker runner scans, skipping
+    `SKIPPED_DIRS` without descending into them."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIPPED_DIRS)
+        for filename in sorted(filenames):
+            if os.path.splitext(filename)[1] in SOURCE_EXTENSIONS:
+                yield Path(dirpath) / filename
 
 _SEVERITY_MAP = {
     "ERROR": Severity.HIGH,
@@ -67,6 +93,7 @@ class SemgrepAdapter(StaticAnalyzerAdapter):
         self.docker_image = docker_image
         self.docker_binary = docker_binary
         self.used_runner: str | None = None
+        self.staged_files: int | None = None  # files copied into the docker runner
 
     def run(self, target: Path) -> Iterable[Finding]:
         payload = self._scan(Path(target).resolve())
@@ -105,35 +132,63 @@ class SemgrepAdapter(StaticAnalyzerAdapter):
         return self._execute(cmd)
 
     def _run_docker(self, docker_path: str, target: Path) -> dict:
-        mount_dir = target.parent if target.is_file() else target
-        scan_path = _CONTAINER_SRC / target.name if target.is_file() else _CONTAINER_SRC
-        cmd = [
-            docker_path, "run", "--rm", "--network", "none",
-            "-e", "SEMGREP_ENABLE_VERSION_CHECK=0",
-            "-v", f"{mount_dir}:{_CONTAINER_SRC}:ro",
-        ]
-        container_configs: list[str] = []
-        for index, cfg in enumerate(self.config_paths):
-            cfg_path = Path(cfg)
-            if not cfg_path.is_file():
+        """Copy only the source files into a fresh, network-less container and
+        scan them on the container's own disk. Bind-mounting a Windows folder
+        into Docker Desktop is slow enough per file access that walking a real
+        project (with target/, .git/, ...) can take many minutes; a single tar
+        stream of just the sources doesn't have that cost."""
+        configs = [Path(cfg) for cfg in self.config_paths]
+        for cfg in configs:
+            if not cfg.is_file():
                 raise RuntimeError(
-                    f"docker runner only supports local rule files (it runs without network); got {cfg!r}"
+                    f"docker runner only supports local rule files (it runs without network); got {str(cfg)!r}"
                 )
-            mount = PurePosixPath(f"/rules{index}")
-            cmd += ["-v", f"{cfg_path.resolve().parent}:{mount}:ro"]
-            container_configs += ["--config", str(mount / cfg_path.name)]
-        cmd += [
-            self.docker_image, "semgrep", "scan", "--json", "--quiet", "--metrics=off",
-            "--disable-version-check", *container_configs, str(scan_path),
-        ]
 
-        payload = self._execute(cmd)
+        base_dir = target.parent if target.is_file() else target
+        sources = [target] if target.is_file() else list(iter_source_files(target))
+        self.staged_files = len(sources)
+        if not sources:
+            return {"results": [], "errors": []}
+
+        name = f"sectestgen-semgrep-{uuid.uuid4().hex[:12]}"
+        container_configs: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "input.tar"
+            with tarfile.open(archive, "w") as tar:
+                for source in sources:
+                    tar.add(source, arcname=f"src/{source.relative_to(base_dir).as_posix()}")
+                for index, cfg in enumerate(configs):
+                    arcname = f"rules/{index}_{cfg.name}"
+                    tar.add(cfg, arcname=arcname)
+                    container_configs += ["--config", f"/{arcname}"]
+
+            try:
+                self._docker_checked([
+                    docker_path, "create", "--name", name, "--network", "none",
+                    "-e", "SEMGREP_ENABLE_VERSION_CHECK=0",
+                    self.docker_image, "semgrep", "scan", "--json", "--quiet", "--metrics=off",
+                    "--disable-version-check", *container_configs, str(_CONTAINER_SRC),
+                ])
+                with archive.open("rb") as stream:
+                    self._docker_checked([docker_path, "cp", "-", f"{name}:/"], stdin=stream)
+                payload = self._execute([docker_path, "start", "--attach", name])
+            finally:
+                # Created containers aren't --rm, and on timeout only the CLI
+                # client is killed, so always remove the container explicitly.
+                subprocess.run([docker_path, "rm", "--force", name], capture_output=True, timeout=60)
+
         # Map container paths back onto the host so locations stay usable.
         for result in payload.get("results", []):
             path = PurePosixPath(result.get("path", ""))
             if path.is_relative_to(_CONTAINER_SRC):
-                result["path"] = str(mount_dir.joinpath(*path.relative_to(_CONTAINER_SRC).parts))
+                result["path"] = str(base_dir.joinpath(*path.relative_to(_CONTAINER_SRC).parts))
         return payload
+
+    def _docker_checked(self, cmd: list[str], stdin=None) -> None:
+        proc = subprocess.run(cmd, stdin=stdin, capture_output=True, timeout=self.timeout)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"docker {cmd[1]} failed (exit {proc.returncode}): {stderr}")
 
     def _execute(self, cmd: list[str]) -> dict:
         proc = subprocess.run(
