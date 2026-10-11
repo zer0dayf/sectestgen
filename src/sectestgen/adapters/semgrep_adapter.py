@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -50,6 +51,26 @@ SKIPPED_DIRS = frozenset({
     "node_modules", "target", "build", "dist", "out",
     ".venv", "venv", "env", "__pycache__", ".mypy_cache", ".pytest_cache", ".tox",
 })
+
+
+_RULES_KEY_RE = re.compile(rb"^rules\s*:", re.MULTILINE)
+
+
+def iter_rule_files(root: Path) -> Iterator[Path]:
+    """Semgrep rule files under `root`: YAML files with a top-level `rules:`
+    key. Rule collections (e.g. a semgrep-rules checkout) also hold CI and
+    tooling YAML, which Semgrep would reject as invalid config."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for filename in sorted(filenames):
+            if os.path.splitext(filename)[1] not in (".yml", ".yaml"):
+                continue
+            path = Path(dirpath) / filename
+            try:
+                if _RULES_KEY_RE.search(path.read_bytes()):
+                    yield path
+            except OSError:
+                continue
 
 
 def iter_source_files(root: Path) -> Iterator[Path]:
@@ -139,9 +160,10 @@ class SemgrepAdapter(StaticAnalyzerAdapter):
         stream of just the sources doesn't have that cost."""
         configs = [Path(cfg) for cfg in self.config_paths]
         for cfg in configs:
-            if not cfg.is_file():
+            if not (cfg.is_file() or cfg.is_dir()):
                 raise RuntimeError(
-                    f"docker runner only supports local rule files (it runs without network); got {str(cfg)!r}"
+                    "docker runner only supports local rule files/directories "
+                    f"(it runs without network); got {str(cfg)!r}"
                 )
 
         base_dir = target.parent if target.is_file() else target
@@ -158,8 +180,16 @@ class SemgrepAdapter(StaticAnalyzerAdapter):
                 for source in sources:
                     tar.add(source, arcname=f"src/{source.relative_to(base_dir).as_posix()}")
                 for index, cfg in enumerate(configs):
-                    arcname = f"rules/{index}_{cfg.name}"
-                    tar.add(cfg, arcname=arcname)
+                    if cfg.is_file():
+                        arcname = f"rules/{index}_{cfg.name}"
+                        tar.add(cfg, arcname=arcname)
+                    else:
+                        arcname = f"rules/{index}"
+                        rule_files = list(iter_rule_files(cfg))
+                        if not rule_files:
+                            raise RuntimeError(f"no Semgrep rule files found under {str(cfg)!r}")
+                        for rule_file in rule_files:
+                            tar.add(rule_file, arcname=f"{arcname}/{rule_file.relative_to(cfg).as_posix()}")
                     container_configs += ["--config", f"/{arcname}"]
 
             try:

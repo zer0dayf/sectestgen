@@ -25,7 +25,7 @@ from sectestgen.adapters.java_reachability import JavaReachabilityEngine
 from sectestgen.adapters.package_usage import ImportUsageReachabilityEngine
 from sectestgen.adapters.reachability import BoundedReachabilityEngine
 from sectestgen.adapters.reporter import HTMLReporter, JSONReporter
-from sectestgen.adapters.semgrep_adapter import SemgrepAdapter
+from sectestgen.adapters.semgrep_adapter import DEFAULT_RULES_PATHS, SemgrepAdapter
 from sectestgen.adapters.spring_adapter import SpringFrameworkAdapter
 from sectestgen.core.adapters import SCAAdapter, StaticAnalyzerAdapter
 from sectestgen.core.models import Finding, Pipeline
@@ -50,9 +50,14 @@ def run_static_pipeline(
     target: Path,
     output_dir: Path | None = None,
     analyzers: list[StaticAnalyzerAdapter] | None = None,
+    extra_rules: list[Path] | None = None,
 ) -> PipelineResult:
+    """`extra_rules`: additional Semgrep rule files/directories run alongside
+    the project's own packs (ignored when `analyzers` is given)."""
     target = Path(target).resolve()
-    analyzers = analyzers if analyzers is not None else [SemgrepAdapter(), BanditAdapter()]
+    if analyzers is None:
+        rules = [*DEFAULT_RULES_PATHS, *(extra_rules or [])]
+        analyzers = [SemgrepAdapter(config_paths=rules), BanditAdapter()]
 
     routes = [
         *FastAPIFrameworkAdapter().discover_routes(target),

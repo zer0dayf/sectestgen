@@ -65,6 +65,13 @@ read-only — Docker must be running. `sectestgen sca` reads a pre-generated
 Grype report (`--grype`), or runs `grype` itself if it's on `PATH`; without
 either it uses only the SBOM's embedded `vulnerabilities`.
 
+Extra rule sets passed with `--rules` are not part of this repository and
+keep their own license (the semgrep-rules collection is under the Semgrep
+Rules License); don't commit them here. Only the five built-in sink
+categories are mapped to a `sink` type and covered by the benchmark
+fixtures; findings from other rules still get reachability evidence and a
+classification, with their CWE kept in the raw Semgrep result.
+
 ## Test
 
 ```bash
@@ -78,6 +85,10 @@ sectestgen --version
 
 # Report 1 (static) — FastAPI and/or Spring project
 sectestgen static path/to/project -o sectestgen-out
+
+# ...with extra Semgrep rules (file or directory, repeatable), e.g. the
+# Java folder of a local checkout of github.com/semgrep/semgrep-rules
+sectestgen static path/to/project --rules path/to/semgrep-rules/java -o sectestgen-out
 
 # Report 2 (SCA)
 sectestgen sca path/to/sbom.cdx.json -s path/to/project --grype grype.json -o sectestgen-out

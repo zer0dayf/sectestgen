@@ -218,3 +218,44 @@ def test_no_semgrep_and_no_docker_raises(monkeypatch, tmp_path):
 
     with pytest.raises(SemgrepNotFoundError):
         list(SemgrepAdapter().run(tmp_path))
+
+
+def _rules_dir(tmp_path: Path) -> Path:
+    rules_dir = tmp_path / "rule-collection"
+    (rules_dir / "java" / "spring").mkdir(parents=True)
+    (rules_dir / ".github" / "workflows").mkdir(parents=True)
+    shutil.copy(SPRING.parent.parent / "rules" / "semgrep" / "spring_security.yml", rules_dir / "java" / "spring" / "a.yaml")
+    (rules_dir / "java" / "spring" / "Example.java").write_text("class Example {}\n", encoding="utf-8")
+    (rules_dir / ".pre-commit-config.yaml").write_text("repos: []\n", encoding="utf-8")
+    (rules_dir / ".github" / "workflows" / "ci.yml").write_text("rules:\n  - x\n", encoding="utf-8")
+    return rules_dir
+
+
+def test_docker_runner_copies_only_rule_files_from_a_rules_directory(monkeypatch, tmp_path):
+    _, target = _project(tmp_path)
+    fake = _FakeDocker()
+    _use_fake_docker(monkeypatch, fake)
+
+    list(SemgrepAdapter(config_paths=[_rules_dir(tmp_path)]).run(target))
+
+    assert [n for n in fake.archive_names if n.startswith("rules/")] == ["rules/0/java/spring/a.yaml"]
+    create = fake.calls[0]
+    assert create[create.index("--config") + 1] == "/rules/0"
+
+
+def test_docker_runner_rejects_rules_directory_without_rules(monkeypatch, tmp_path):
+    _, target = _project(tmp_path)
+    empty = tmp_path / "empty-rules"
+    empty.mkdir()
+    (empty / "notes.yml").write_text("repos: []\n", encoding="utf-8")
+    _use_fake_docker(monkeypatch, _FakeDocker())
+
+    with pytest.raises(RuntimeError, match="no Semgrep rule files"):
+        list(SemgrepAdapter(config_paths=[empty]).run(target))
+
+
+@needs_semgrep
+def test_rules_directory_scans_for_real(tmp_path):
+    findings = list(SemgrepAdapter(config_paths=[_rules_dir(tmp_path)]).run(SPRING))
+
+    assert {f.sink for f in findings} == ALL_SINKS

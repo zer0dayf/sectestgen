@@ -34,12 +34,20 @@ def build_parser() -> argparse.ArgumentParser:
     static_parser = subparsers.add_parser(
         "static", help="Static-code finding validation pipeline (Semgrep/Bandit) -> Report 1."
     )
-    static_parser.add_argument("target", help="Path to the FastAPI project to analyze.")
+    static_parser.add_argument("target", help="Path to the FastAPI/Spring project to analyze.")
     static_parser.add_argument(
         "-o",
         "--output",
         default="sectestgen-out",
         help="Directory to write report1.json / report1.html into (default: ./sectestgen-out).",
+    )
+    static_parser.add_argument(
+        "--rules",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Extra Semgrep rule file or directory, run alongside the built-in packs "
+        "(repeatable; e.g. a local semgrep-rules checkout's java/ folder).",
     )
 
     sca_parser = subparsers.add_parser(
@@ -70,7 +78,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "static":
-        result = run_static_pipeline(Path(args.target), output_dir=Path(args.output))
+        result = run_static_pipeline(
+            Path(args.target),
+            output_dir=Path(args.output),
+            extra_rules=[Path(p) for p in args.rules],
+        )
         _print_summary("static", "Report 1", result)
         return 0
     if args.command == "sca":

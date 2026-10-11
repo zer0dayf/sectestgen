@@ -42,3 +42,19 @@ def test_sca_pipeline_runs_against_java_fixture(tmp_path, capsys):
     assert "[sca] 3 finding(s)" in captured.out
     assert (tmp_path / "report2.json").exists()
     assert (tmp_path / "report2.html").exists()
+
+
+def test_static_accepts_extra_rules(tmp_path, capsys, monkeypatch):
+    seen = {}
+
+    def fake_pipeline(target, output_dir=None, extra_rules=None):
+        seen["extra_rules"] = extra_rules
+        from sectestgen.pipeline import PipelineResult
+
+        return PipelineResult(findings=[], routes=[])
+
+    monkeypatch.setattr("sectestgen.cli.run_static_pipeline", fake_pipeline)
+    exit_code = main(["static", str(tmp_path), "--rules", "a.yml", "--rules", "more-rules"])
+
+    assert exit_code == 0
+    assert seen["extra_rules"] == [Path("a.yml"), Path("more-rules")]
