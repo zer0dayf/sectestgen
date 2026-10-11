@@ -1,0 +1,173 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:maven/com.example/sca-fixture@0.1.0",
+      "name": "sca-fixture",
+      "version": "0.1.0"
+    },
+    "properties": [
+      {
+        "name": "sectestgen:fixture",
+        "value": "hand-written benchmark data, not a real scan"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.1",
+      "group": "org.springframework.boot",
+      "name": "spring-boot-starter-web",
+      "version": "2.6.1",
+      "purl": "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      "group": "org.apache.logging.log4j",
+      "name": "log4j-core",
+      "version": "2.14.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:maven/org.apache.logging.log4j/log4j-api@2.14.1",
+      "group": "org.apache.logging.log4j",
+      "name": "log4j-api",
+      "version": "2.14.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-api@2.14.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:maven/org.apache.commons/commons-text@1.9",
+      "group": "org.apache.commons",
+      "name": "commons-text",
+      "version": "1.9",
+      "purl": "pkg:maven/org.apache.commons/commons-text@1.9"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+      "group": "com.fasterxml.jackson.core",
+      "name": "jackson-databind",
+      "version": "2.9.8",
+      "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:maven/com.example/sca-fixture@0.1.0",
+      "dependsOn": [
+        "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.1",
+        "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+        "pkg:maven/org.apache.commons/commons-text@1.9",
+        "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8"
+      ]
+    },
+    {
+      "ref": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      "dependsOn": [
+        "pkg:maven/org.apache.logging.log4j/log4j-api@2.14.1"
+      ]
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "bom-ref": "CVE-2021-44228:pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      "id": "CVE-2021-44228",
+      "source": {
+        "name": "NVD",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "NVD"
+          },
+          "score": 10.0,
+          "severity": "critical",
+          "method": "CVSSv31"
+        }
+      ],
+      "description": "Log4Shell: JNDI lookup in log messages allows remote code execution.",
+      "recommendation": "Upgrade to 2.15.0 or later.",
+      "affects": [
+        {
+          "ref": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+          "versions": [
+            {
+              "version": "2.15.0",
+              "status": "unaffected"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "bom-ref": "CVE-2022-42889:pkg:maven/org.apache.commons/commons-text@1.9",
+      "id": "CVE-2022-42889",
+      "source": {
+        "name": "NVD",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-42889"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "NVD"
+          },
+          "score": 9.8,
+          "severity": "critical",
+          "method": "CVSSv31"
+        }
+      ],
+      "description": "Text4Shell: StringSubstitutor default interpolators allow code execution.",
+      "recommendation": "Upgrade to 1.10.0 or later.",
+      "affects": [
+        {
+          "ref": "pkg:maven/org.apache.commons/commons-text@1.9",
+          "versions": [
+            {
+              "version": "1.10.0",
+              "status": "unaffected"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "bom-ref": "CVE-2019-12384:pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+      "id": "CVE-2019-12384",
+      "source": {
+        "name": "NVD",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2019-12384"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "NVD"
+          },
+          "score": 5.9,
+          "severity": "medium",
+          "method": "CVSSv31"
+        }
+      ],
+      "description": "jackson-databind polymorphic typing gadget (logback-core).",
+      "recommendation": "Upgrade to 2.9.9.1 or later.",
+      "affects": [
+        {
+          "ref": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+          "versions": [
+            {
+              "version": "2.9.9.1",
+              "status": "unaffected"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

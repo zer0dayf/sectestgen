@@ -1,0 +1,23 @@
+[
+  {
+    "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+    "cve": "CVE-2021-44228",
+    "usage": "referenced_in_entry_point",
+    "expected_classification": "POTENTIALLY_REACHABLE",
+    "expected_confidence": "MEDIUM"
+  },
+  {
+    "purl": "pkg:maven/org.apache.commons/commons-text@1.9",
+    "cve": "CVE-2022-42889",
+    "usage": "referenced_outside_entry_point",
+    "expected_classification": "POTENTIALLY_REACHABLE",
+    "expected_confidence": "LOW"
+  },
+  {
+    "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+    "cve": "CVE-2019-12384",
+    "usage": "direct_not_imported",
+    "expected_classification": "NOT_OBSERVED",
+    "expected_confidence": "MEDIUM"
+  }
+]

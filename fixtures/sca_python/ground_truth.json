@@ -1,0 +1,30 @@
+[
+  {
+    "purl": "pkg:pypi/pyyaml@5.3.1",
+    "cve": "CVE-2020-14343",
+    "usage": "referenced_in_entry_point",
+    "expected_classification": "POTENTIALLY_REACHABLE",
+    "expected_confidence": "MEDIUM"
+  },
+  {
+    "purl": "pkg:pypi/jinja2@2.10",
+    "cve": "CVE-2019-10906",
+    "usage": "imported_only",
+    "expected_classification": "NOT_OBSERVED",
+    "expected_confidence": "LOW"
+  },
+  {
+    "purl": "pkg:pypi/requests@2.19.1",
+    "cve": "CVE-2018-18074",
+    "usage": "direct_not_imported",
+    "expected_classification": "NOT_OBSERVED",
+    "expected_confidence": "MEDIUM"
+  },
+  {
+    "purl": "pkg:pypi/urllib3@1.23",
+    "cve": "CVE-2019-11324",
+    "usage": "transitive_not_imported",
+    "expected_classification": "NOT_OBSERVED",
+    "expected_confidence": "LOW"
+  }
+]
