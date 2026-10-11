@@ -65,9 +65,22 @@ read-only — Docker must be running. `sectestgen sca` reads a pre-generated
 Grype report (`--grype`), or runs `grype` itself if it's on `PATH`; without
 either it uses only the SBOM's embedded `vulnerabilities`.
 
-Extra rule sets passed with `--rules` are not part of this repository and
-keep their own license (the semgrep-rules collection is under the Semgrep
-Rules License); don't commit them here. Only the five built-in sink
+Extra rule sets passed with `--rules` or fetched with `sectestgen rules
+fetch` are not part of this repository and keep their own license; don't
+commit them here. Known packs (`src/sectestgen/rule_packs.py`), Java/Python
+folders only:
+
+| Pack | Source | License |
+|---|---|---|
+| `semgrep` | github.com/semgrep/semgrep-rules | Semgrep Rules License v1.0 |
+| `gitlab` | gitlab.com/gitlab-org/security-products/sast-rules | MIT |
+| `elttam` | github.com/elttam/semgrep-rules (`rules/`) | MIT |
+| `elttam-audit` | github.com/elttam/semgrep-rules (`rules-audit/`, noisier) | MIT |
+| `trailofbits` | github.com/trailofbits/semgrep-rules | AGPL-3.0 |
+
+Packs are cached per user (`%LOCALAPPDATA%\sectestgen\rule-packs`, or
+`~/.cache/sectestgen/rule-packs`; override with `SECTESTGEN_RULES_DIR`).
+Fetching is the only networked step; scans stay offline. Only the five built-in sink
 categories are mapped to a `sink` type and covered by the benchmark
 fixtures; findings from other rules still get reachability evidence and a
 classification, with their CWE kept in the raw Semgrep result.
@@ -89,6 +102,11 @@ sectestgen static path/to/project -o sectestgen-out
 # ...with extra Semgrep rules (file or directory, repeatable), e.g. the
 # Java folder of a local checkout of github.com/semgrep/semgrep-rules
 sectestgen static path/to/project --rules path/to/semgrep-rules/java -o sectestgen-out
+
+# Public rule packs: fetch once (git + network), then scan offline with them
+sectestgen rules list
+sectestgen rules fetch --all            # or: sectestgen rules fetch gitlab elttam
+sectestgen static path/to/project --rule-pack all --semgrep-timeout 900 -o sectestgen-out
 
 # Report 2 (SCA)
 sectestgen sca path/to/sbom.cdx.json -s path/to/project --grype grype.json -o sectestgen-out

@@ -51,13 +51,15 @@ def run_static_pipeline(
     output_dir: Path | None = None,
     analyzers: list[StaticAnalyzerAdapter] | None = None,
     extra_rules: list[Path] | None = None,
+    semgrep_timeout: int = 300,
 ) -> PipelineResult:
     """`extra_rules`: additional Semgrep rule files/directories run alongside
-    the project's own packs (ignored when `analyzers` is given)."""
+    the project's own packs; `semgrep_timeout` in seconds (both ignored when
+    `analyzers` is given)."""
     target = Path(target).resolve()
     if analyzers is None:
         rules = [*DEFAULT_RULES_PATHS, *(extra_rules or [])]
-        analyzers = [SemgrepAdapter(config_paths=rules), BanditAdapter()]
+        analyzers = [SemgrepAdapter(config_paths=rules, timeout=semgrep_timeout), BanditAdapter()]
 
     routes = [
         *FastAPIFrameworkAdapter().discover_routes(target),

@@ -47,7 +47,7 @@ def test_sca_pipeline_runs_against_java_fixture(tmp_path, capsys):
 def test_static_accepts_extra_rules(tmp_path, capsys, monkeypatch):
     seen = {}
 
-    def fake_pipeline(target, output_dir=None, extra_rules=None):
+    def fake_pipeline(target, output_dir=None, extra_rules=None, semgrep_timeout=None):
         seen["extra_rules"] = extra_rules
         from sectestgen.pipeline import PipelineResult
 
