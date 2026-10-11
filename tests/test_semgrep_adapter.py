@@ -259,3 +259,11 @@ def test_rules_directory_scans_for_real(tmp_path):
     findings = list(SemgrepAdapter(config_paths=[_rules_dir(tmp_path)]).run(SPRING))
 
     assert {f.sink for f in findings} == ALL_SINKS
+
+
+def test_docker_runner_reports_missing_rule_path(monkeypatch, tmp_path):
+    _, target = _project(tmp_path)
+    _use_fake_docker(monkeypatch, _FakeDocker())
+
+    with pytest.raises(FileNotFoundError, match="rule path not found"):
+        list(SemgrepAdapter(config_paths=[tmp_path / "no-such-rules"]).run(target))

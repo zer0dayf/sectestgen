@@ -159,12 +159,15 @@ class SemgrepAdapter(StaticAnalyzerAdapter):
         project (with target/, .git/, ...) can take many minutes; a single tar
         stream of just the sources doesn't have that cost."""
         configs = [Path(cfg) for cfg in self.config_paths]
-        for cfg in configs:
-            if not (cfg.is_file() or cfg.is_dir()):
+        for raw, cfg in zip(self.config_paths, configs):
+            if cfg.is_file() or cfg.is_dir():
+                continue
+            if raw == "auto" or raw.startswith(("p/", "r/", "http://", "https://")):
                 raise RuntimeError(
                     "docker runner only supports local rule files/directories "
-                    f"(it runs without network); got {str(cfg)!r}"
+                    f"(it runs without network); got registry config {raw!r}"
                 )
+            raise FileNotFoundError(f"Semgrep rule path not found: {raw!r}")
 
         base_dir = target.parent if target.is_file() else target
         sources = [target] if target.is_file() else list(iter_source_files(target))
