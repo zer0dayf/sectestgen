@@ -1,0 +1,126 @@
+rules:
+  - id: sectestgen-java-os-command-injection
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Runtime.exec() with a non-literal command string (split on whitespace,
+      shell metacharacters in user input can add arguments), or a
+      ProcessBuilder that runs a shell. If any part is derived from request
+      data this is OS command injection (CWE-78).
+    metadata:
+      cwe: ["CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"]
+      sink_type: command_execution
+      owasp: ["A03:2021 - Injection"]
+    patterns:
+      - pattern-either:
+          - pattern: (Runtime $R).exec($CMD, ...)
+          - pattern: Runtime.getRuntime().exec($CMD, ...)
+          - pattern: new ProcessBuilder("sh", "-c", ...)
+          - pattern: new ProcessBuilder("bash", "-c", ...)
+          - pattern: new ProcessBuilder("cmd", "/c", ...)
+          - pattern: new ProcessBuilder("cmd.exe", "/c", ...)
+      - pattern-not: (Runtime $R).exec("...", ...)
+      - pattern-not: Runtime.getRuntime().exec("...", ...)
+
+  - id: sectestgen-java-expression-injection
+    languages: [java]
+    severity: ERROR
+    message: >-
+      A string is parsed/evaluated as an expression or script (SpEL,
+      javax.script). If it can be influenced by request data this is
+      dynamic code evaluation (CWE-95 / CWE-917).
+    metadata:
+      cwe: ["CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')"]
+      sink_type: dynamic_evaluation
+      owasp: ["A03:2021 - Injection"]
+    patterns:
+      - pattern-either:
+          - pattern: (ExpressionParser $P).parseExpression($E, ...)
+          - pattern: (SpelExpressionParser $P).parseExpression($E, ...)
+          - pattern: new SpelExpressionParser().parseExpression($E, ...)
+          - pattern: (ScriptEngine $S).eval($E, ...)
+      - pattern-not: $X.parseExpression("...", ...)
+      - pattern-not: $X.eval("...", ...)
+
+  - id: sectestgen-java-unsafe-deserialization
+    languages: [java]
+    severity: ERROR
+    message: >-
+      ObjectInputStream.readObject() deserializes arbitrary classes.
+      Untrusted bytes reaching this sink can execute code through gadget
+      chains (CWE-502).
+    metadata:
+      cwe: ["CWE-502: Deserialization of Untrusted Data"]
+      sink_type: unsafe_deserialization
+      owasp: ["A08:2021 - Software and Data Integrity Failures"]
+    patterns:
+      - pattern-either:
+          - pattern: (ObjectInputStream $IN).readObject()
+          - pattern: (ObjectInputStream $IN).readUnshared()
+          - pattern: new ObjectInputStream(...).readObject()
+
+  - id: sectestgen-java-path-traversal
+    languages: [java]
+    severity: ERROR
+    message: >-
+      A file is read/written through a path resolved from an unvalidated,
+      non-literal fragment. If the fragment is user-controlled this is path
+      traversal (CWE-22) unless the normalized path is checked to stay
+      inside the base directory.
+    metadata:
+      cwe: ["CWE-22: Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"]
+      sink_type: path_traversal
+      owasp: ["A01:2021 - Broken Access Control"]
+    patterns:
+      - pattern-either:
+          - pattern: Files.$OP($BASE.resolve($X), ...)
+          - pattern: Files.$OP(Paths.get($BASE, $X), ...)
+          - pattern: Files.$OP(Path.of($BASE, $X), ...)
+          - pattern: new FileInputStream(new File($BASE, $X))
+          - pattern: new FileReader(new File($BASE, $X))
+          - pattern: |
+              $T = $BASE.resolve($X);
+              ...
+              Files.$OP($T, ...);
+          - pattern: |
+              $TYPE $T = $BASE.resolve($X);
+              ...
+              Files.$OP($T, ...);
+      - metavariable-regex:
+          metavariable: $OP
+          regex: ^(readString|readAllBytes|readAllLines|lines|newInputStream|newBufferedReader|write|writeString|newOutputStream|delete|copy)$
+      - pattern-not: Files.$OP($BASE.resolve("..."), ...)
+      - pattern-not-inside: |
+          if (!$T.startsWith($ROOT)) { ... }
+          ...
+
+  - id: sectestgen-java-sql-injection
+    languages: [java]
+    severity: ERROR
+    message: >-
+      A SQL statement is built by string concatenation/formatting and
+      executed. If any part is derived from request data this is SQL
+      injection (CWE-89); use bound parameters instead.
+    metadata:
+      cwe: ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"]
+      sink_type: sql_injection
+      owasp: ["A03:2021 - Injection"]
+    patterns:
+      - pattern-either:
+          - pattern: $DB.$EXEC("..." + $X, ...)
+          - pattern: $DB.$EXEC(String.format(...), ...)
+          - pattern: |
+              String $SQL = "..." + $X + ...;
+              ...
+              $DB.$EXEC($SQL, ...);
+          - pattern: |
+              String $SQL = "..." + $X;
+              ...
+              $DB.$EXEC($SQL, ...);
+          - pattern: |
+              String $SQL = String.format(...);
+              ...
+              $DB.$EXEC($SQL, ...);
+      - metavariable-regex:
+          metavariable: $EXEC
+          regex: ^(query|queryForList|queryForObject|queryForMap|queryForRowSet|update|batchUpdate|execute|executeQuery|executeUpdate|executeLargeUpdate|addBatch|prepareStatement|createQuery|createNativeQuery)$
