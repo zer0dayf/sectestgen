@@ -82,7 +82,7 @@ _MAVEN_PACKAGES = {
     ("org.springframework", "spring-core"): ["org.springframework.core"],
 }
 
-_JAVA_IMPORT_RE = re.compile(r"^\s*import\s+(static\s+)?([\w.]+?)(\.\*)?\s*;", re.MULTILINE)
+_JAVA_IMPORT_RE = re.compile(r"^[ \t]*import\s+(static\s+)?([\w.]+?)(\.\*)?\s*;", re.MULTILINE)
 _JAVA_COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 _JAVA_ENTRY_POINT_RE = re.compile(
     r"@(RestController|Controller|RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\b"

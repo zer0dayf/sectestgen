@@ -141,3 +141,15 @@ def test_import_names_and_purl_parsing():
     )
     ref = parse_purl("pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1?type=jar")
     assert (ref.ecosystem, ref.namespace, ref.name) == ("maven", "org.apache.logging.log4j", "log4j-core")
+
+
+def test_java_import_lines_after_blank_lines_are_not_references(tmp_path):
+    (tmp_path / "A.java").write_text(
+        "package p;\n\nimport org.yaml.snakeyaml.Yaml;\n\nclass A {}\n", encoding="utf-8"
+    )
+    finding = Finding(id="x", pipeline=Pipeline.SCA, tool="t", purl="pkg:maven/org.yaml/snakeyaml@1.26")
+
+    ImportUsageReachabilityEngine().analyze(finding, tmp_path)
+
+    assert finding.raw["usage"]["imports"] == ["A.java:3 import org.yaml.snakeyaml"]
+    assert finding.raw["usage"]["status"] == "imported_only"
