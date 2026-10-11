@@ -1,7 +1,7 @@
 """Pipeline orchestration.
 
-- Static (WP1): Semgrep/Bandit -> FastAPI source/sink correlation ->
-  bounded reachability -> classification -> Report 1.
+- Static (WP1): Semgrep/Bandit -> FastAPI/Spring source/sink correlation
+  -> bounded Python/Java reachability -> classification -> Report 1.
 - SCA (WP2): CycloneDX SBOM (+ embedded vulnerabilities) / Grype ->
   de-duplication on purl + CVE -> Python/Java import-usage evidence ->
   classification -> Report 2.
@@ -21,10 +21,12 @@ from sectestgen.adapters.classifier import DefaultClassifier, SCAClassifier
 from sectestgen.adapters.cyclonedx import CycloneDXAdapter, load_sbom, normalize_purl
 from sectestgen.adapters.fastapi_adapter import FastAPIFrameworkAdapter
 from sectestgen.adapters.grype_adapter import GrypeAdapter
+from sectestgen.adapters.java_reachability import JavaReachabilityEngine
 from sectestgen.adapters.package_usage import ImportUsageReachabilityEngine
 from sectestgen.adapters.reachability import BoundedReachabilityEngine
 from sectestgen.adapters.reporter import HTMLReporter, JSONReporter
 from sectestgen.adapters.semgrep_adapter import SemgrepAdapter
+from sectestgen.adapters.spring_adapter import SpringFrameworkAdapter
 from sectestgen.core.adapters import SCAAdapter, StaticAnalyzerAdapter
 from sectestgen.core.models import Finding, Pipeline
 
@@ -52,7 +54,10 @@ def run_static_pipeline(
     target = Path(target).resolve()
     analyzers = analyzers if analyzers is not None else [SemgrepAdapter(), BanditAdapter()]
 
-    routes = list(FastAPIFrameworkAdapter().discover_routes(target))
+    routes = [
+        *FastAPIFrameworkAdapter().discover_routes(target),
+        *SpringFrameworkAdapter().discover_routes(target),
+    ]
 
     findings: list[Finding] = []
     errors: list[str] = []
@@ -62,10 +67,12 @@ def run_static_pipeline(
         except Exception as exc:  # noqa: BLE001 - one analyzer failing shouldn't sink the run
             errors.append(f"{type(analyzer).__name__}: {exc}")
 
-    reachability_engine = BoundedReachabilityEngine(routes)
+    python_engine = BoundedReachabilityEngine(routes)
+    java_engine = JavaReachabilityEngine(routes)
     classifier = DefaultClassifier()
     for finding in findings:
-        reachability_engine.analyze(finding, target)
+        is_java = finding.location is not None and finding.location.file_path.endswith(".java")
+        (java_engine if is_java else python_engine).analyze(finding, target)
         classifier.classify(finding)
 
     result = PipelineResult(findings=findings, routes=routes, errors=errors)

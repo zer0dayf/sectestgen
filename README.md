@@ -1,12 +1,13 @@
 # SecTestGen
 
-Modular security finding validation and evidence platform for FastAPI backends and REST APIs.
+Modular security finding validation and evidence platform for REST API
+backends — FastAPI (Python) and Spring Boot (Java).
 
 Two pipelines:
 
 - **Static** — Semgrep / Bandit / (optional) CodeQL findings, correlated with FastAPI
-  user-input sources and sinks, validated with bounded source-to-sink reachability
-  analysis and, when safe, a network-isolated Docker sandbox. Produces Report 1.
+  or Spring user-input sources and sinks, validated with bounded source-to-sink
+  reachability analysis and, when safe, a network-isolated Docker sandbox. Produces Report 1.
 - **SCA** — CycloneDX SBOM data plus Dependency-Track / Snyk / Grype results, checked
   against actual package imports and (when known) symbol usage. Produces Report 2.
 
@@ -19,12 +20,22 @@ touching the normalized `Finding` model in `sectestgen.core.models`.
 
 ## Status
 
-WP1 (static pipeline) is implemented: Semgrep + Bandit adapters, a bounded
-AST-based FastAPI route/source discovery adapter, a bounded source-to-sink
-reachability engine, a default classifier, and JSON/HTML Report 1 output.
-Evaluated against `fixtures/vulnerable_fastapi/`, it correctly correlates
-all 5 benchmark sink categories (CWE-78/95/502/22/89) to their FastAPI
-entry point and source.
+WP1 (static pipeline) is implemented for **Python/FastAPI and Java/Spring**:
+
+- Semgrep (project rule packs in `rules/semgrep/`: `fastapi_security.yml`,
+  `spring_security.yml`) + Bandit (Python).
+- Route/user-input discovery: AST-only for FastAPI, tree-sitter-only for
+  Spring (`@RestController`/`@Controller`, class-level `@RequestMapping`
+  prefixes, `@PathVariable`/`@RequestParam`/`@RequestHeader`/`@CookieValue`/
+  `@RequestBody`, ...). No project code is imported, compiled or run.
+- Bounded single-function/method source-to-sink reachability for both
+  languages, a default classifier, and JSON/HTML Report 1 output.
+
+Evaluated against `fixtures/vulnerable_fastapi/` and
+`fixtures/vulnerable_spring/`, all 5 benchmark sink categories
+(CWE-78/95/502/22/89) resolve to `REACHABLE` with the correct entry point
+and source in both languages, and none of the SAFE counterparts are flagged
+by the Java rules.
 
 WP2 (SCA pipeline) is in progress: a CycloneDX SBOM reader, a CycloneDX
 `vulnerabilities` adapter (the shape Dependency-Track exports) and a Grype
@@ -46,10 +57,12 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-`semgrep` and `bandit` must be importable from this environment (both are
-pulled in by the `dev` extra); `sectestgen static` shells out to whichever
-copies are first on `PATH`. `sectestgen sca` reads a pre-generated Grype
-report (`--grype`), or runs `grype` itself if it's on `PATH`; without
+`bandit` comes with the `dev` extra. `semgrep` does too, except on Windows,
+which has no native build: there (or wherever the `semgrep` binary is
+missing or blocked) `SemgrepAdapter` runs the pinned `semgrep/semgrep`
+Docker image instead, offline (`--network none`) with the target mounted
+read-only — Docker must be running. `sectestgen sca` reads a pre-generated
+Grype report (`--grype`), or runs `grype` itself if it's on `PATH`; without
 either it uses only the SBOM's embedded `vulnerabilities`.
 
 ## Test
@@ -62,6 +75,10 @@ pytest
 
 ```bash
 sectestgen --version
-sectestgen static path/to/fastapi/project -o sectestgen-out   # Report 1 (WP1)
-sectestgen sca path/to/sbom.cdx.json -s path/to/project     --grype grype.json -o sectestgen-out                      # Report 2 (WP2)
+
+# Report 1 (static) — FastAPI and/or Spring project
+sectestgen static path/to/project -o sectestgen-out
+
+# Report 2 (SCA)
+sectestgen sca path/to/sbom.cdx.json -s path/to/project --grype grype.json -o sectestgen-out
 ```

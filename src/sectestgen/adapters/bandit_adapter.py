@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Iterable
@@ -54,7 +55,11 @@ class BanditAdapter(StaticAnalyzerAdapter):
         self.binary = binary
 
     def run(self, target: Path) -> Iterable[Finding]:
-        binary_path = shutil.which(self.binary)
+        # Also look next to the running interpreter, so `.venv/Scripts/sectestgen`
+        # finds the venv's bandit without the venv being activated.
+        binary_path = shutil.which(self.binary) or shutil.which(
+            self.binary, path=str(Path(sys.executable).parent)
+        )
         if binary_path is None:
             raise BanditNotFoundError(
                 f"'{self.binary}' not found on PATH; install bandit to run the static pipeline."
