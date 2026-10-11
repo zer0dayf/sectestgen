@@ -49,17 +49,20 @@ class BanditNotFoundError(RuntimeError):
     """Raised when the `bandit` binary isn't on PATH."""
 
 
+def find_bandit(binary: str = "bandit") -> str | None:
+    """`binary` on PATH, else next to the running interpreter, so
+    `.venv/Scripts/sectestgen` finds the venv's bandit without the venv
+    being activated."""
+    return shutil.which(binary) or shutil.which(binary, path=str(Path(sys.executable).parent))
+
+
 class BanditAdapter(StaticAnalyzerAdapter):
     def __init__(self, timeout: int = 60, binary: str = "bandit") -> None:
         self.timeout = timeout
         self.binary = binary
 
     def run(self, target: Path) -> Iterable[Finding]:
-        # Also look next to the running interpreter, so `.venv/Scripts/sectestgen`
-        # finds the venv's bandit without the venv being activated.
-        binary_path = shutil.which(self.binary) or shutil.which(
-            self.binary, path=str(Path(sys.executable).parent)
-        )
+        binary_path = find_bandit(self.binary)
         if binary_path is None:
             raise BanditNotFoundError(
                 f"'{self.binary}' not found on PATH; install bandit to run the static pipeline."

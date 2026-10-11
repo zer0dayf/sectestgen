@@ -1,13 +1,14 @@
-import shutil
 from pathlib import Path
 
 import pytest
 
-from sectestgen.adapters.bandit_adapter import BanditAdapter
+from sectestgen.adapters.bandit_adapter import BanditAdapter, find_bandit
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "vulnerable_fastapi"
 
-pytestmark = pytest.mark.skipif(shutil.which("bandit") is None, reason="bandit not installed")
+# Same lookup as the adapter (PATH, then next to the interpreter), so the
+# tests run whenever the adapter itself would.
+pytestmark = pytest.mark.skipif(find_bandit() is None, reason="bandit not installed")
 
 
 def test_finds_known_sink_categories_in_fixture():
