@@ -12,6 +12,7 @@ from sectestgen.adapters.package_usage import (
     import_names_for,
     parse_purl,
 )
+from sectestgen.adapters.vulnerable_symbols import VulnerableSymbolDB
 from sectestgen.core.models import Classification, Confidence, Finding, Pipeline
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -30,7 +31,7 @@ _STATUS_FOR_USAGE = {
 def _analyze(fixture: Path, findings: list[Finding]) -> dict[str, Finding]:
     sbom = load_sbom(fixture / "sbom.cdx.json")
     routes = list(FastAPIFrameworkAdapter().discover_routes(fixture))
-    engine = ImportUsageReachabilityEngine(sbom, routes)
+    engine = ImportUsageReachabilityEngine(sbom, routes, VulnerableSymbolDB())
     classifier = SCAClassifier()
     return {f.cve: classifier.classify(engine.analyze(f, fixture)) for f in findings}
 
@@ -50,6 +51,7 @@ def test_matches_ground_truth(fixture, findings):
     for entry in truth:
         finding = results[entry["cve"]]
         assert finding.raw["usage"]["status"] == _STATUS_FOR_USAGE.get(entry["usage"], entry["usage"])
+        assert finding.raw["usage"].get("symbol_status") == entry["symbol_status"], entry["cve"]
         assert finding.classification.value == entry["expected_classification"], entry["cve"]
         assert finding.confidence.value == entry["expected_confidence"], entry["cve"]
 
@@ -59,8 +61,21 @@ def test_python_reference_inside_route_is_recorded_as_evidence():
     pyyaml = _analyze(PY, findings)["CVE-2020-14343"]
 
     assert pyyaml.raw["usage"]["status"] == "referenced_in_entry_point"
-    assert any("app.py" in p and "POST /config/parse" in p for p in pyyaml.reachability.path)
+    assert any("yaml.load" in p and "POST /config/parse" in p for p in pyyaml.reachability.path)
+    assert pyyaml.reachability.reachable is True
+
+
+def test_package_reference_without_symbol_metadata_stays_unproven():
+    findings = list(GrypeAdapter(report=PY / "grype.json").run(PY / "sbom.cdx.json"))
+    sbom = load_sbom(PY / "sbom.cdx.json")
+    routes = list(FastAPIFrameworkAdapter().discover_routes(PY))
+    pyyaml = next(f for f in findings if f.cve == "CVE-2020-14343")
+
+    SCAClassifier().classify(ImportUsageReachabilityEngine(sbom, routes).analyze(pyyaml, PY))
+
+    assert "symbol_status" not in pyyaml.raw["usage"]
     assert pyyaml.reachability.reachable is None
+    assert pyyaml.classification is Classification.POTENTIALLY_REACHABLE
 
 
 def test_transitive_not_imported_names_parent():

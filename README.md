@@ -37,17 +37,24 @@ Evaluated against `fixtures/vulnerable_fastapi/` and
 and source in both languages, and none of the SAFE counterparts are flagged
 by the Java rules.
 
-WP2 (SCA pipeline) is in progress: a CycloneDX SBOM reader, a CycloneDX
-`vulnerabilities` adapter (the shape Dependency-Track exports) and a Grype
-adapter, de-duplication on purl + CVE, and an import/usage engine for
-**Python and Java/Maven** projects that records where a vulnerable package
-is imported and referenced (and whether that's inside a FastAPI route or a
-Spring controller). Classified into Report 2 (JSON + HTML). Evaluated
-against `fixtures/sca_python/` and `fixtures/sca_java/`, all 7 benchmark
-advisories match their ground truth. Snyk support is still open.
+WP2 (SCA pipeline): a CycloneDX SBOM reader, a CycloneDX `vulnerabilities`
+adapter (the shape Dependency-Track exports), Grype and Snyk adapters,
+de-duplication on purl + CVE, and an import/usage engine for **Python and
+Java/Maven** projects that records where a vulnerable package is imported
+and referenced (and whether that's inside a FastAPI route or a Spring
+controller). When an advisory's vulnerable symbols are known — from Snyk's
+function metadata, the curated table in
+`src/sectestgen/adapters/vulnerable_symbols.py`, or your own `--symbols`
+file — references are resolved to qualified names (Python import aliases,
+Java imports and declared variable types) and matched against them.
+Classified into Report 2 (JSON + HTML). Evaluated against
+`fixtures/sca_python/` and `fixtures/sca_java/`, all 7 benchmark advisories
+match their ground truth.
 
-Import/usage evidence never yields `REACHABLE`/`CONFIRMED` on its own, and
-`NOT_OBSERVED` means "no use observed", not "safe".
+Only a known vulnerable symbol referenced inside an entry point yields
+`REACHABLE` (argument values are not checked); package-level import/usage
+evidence never does, and nothing here yields `CONFIRMED`. `NOT_OBSERVED`
+means "no use observed", not "safe".
 
 ## Setup
 
@@ -63,7 +70,9 @@ missing or blocked) `SemgrepAdapter` runs the pinned `semgrep/semgrep`
 Docker image instead, offline (`--network none`) with the target mounted
 read-only — Docker must be running. `sectestgen sca` reads a pre-generated
 Grype report (`--grype`), or runs `grype` itself if it's on `PATH`; without
-either it uses only the SBOM's embedded `vulnerabilities`.
+either it uses only the SBOM's embedded `vulnerabilities`. Snyk is read
+from a `snyk test --json` report (`--snyk`) only — sectestgen never runs
+the Snyk CLI, since that needs an account and uploads the dependency graph.
 
 Extra rule sets passed with `--rules` or fetched with `sectestgen rules
 fetch` are not part of this repository and keep their own license; don't
@@ -110,4 +119,8 @@ sectestgen static path/to/project --rule-pack all --semgrep-timeout 900 -o secte
 
 # Report 2 (SCA)
 sectestgen sca path/to/sbom.cdx.json -s path/to/project --grype grype.json -o sectestgen-out
+
+# ...with a Snyk report and extra vulnerable-symbol metadata
+# symbols.json: [{"advisory": "CVE-...", "purl": "pkg:pypi/name", "symbols": ["module.func"]}]
+sectestgen sca path/to/sbom.cdx.json -s path/to/project --snyk snyk.json --symbols symbols.json
 ```

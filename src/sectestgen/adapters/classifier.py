@@ -40,17 +40,30 @@ class DefaultClassifier(Classifier):
 class SCAClassifier(Classifier):
     """Turns `ImportUsageReachabilityEngine` evidence into Classification/Confidence.
 
-    Import/reference evidence never yields REACHABLE or CONFIRMED: without
-    vulnerable-symbol metadata it can't show the vulnerable code path runs.
-    NOT_OBSERVED is "no use was observed", never "safe" — a transitive
-    dependency keeps LOW confidence because its parent may still call it.
+    Package-level import/reference evidence never yields REACHABLE: only a
+    known vulnerable symbol referenced inside an entry point does. A package
+    that is referenced while none of its known vulnerable symbols are stays
+    POTENTIALLY_REACHABLE at LOW confidence, because the package's own code
+    may reach them. NOT_OBSERVED is "no use was observed", never "safe" — a
+    transitive dependency keeps LOW confidence because its parent may still
+    call it.
     """
 
     def classify(self, finding: Finding) -> Finding:
         usage = finding.raw.get("usage") or {}
         status = usage.get("status")
+        symbol_status = usage.get("symbol_status")
 
-        if status == "referenced_in_entry_point":
+        if symbol_status == "symbol_referenced_in_entry_point":
+            finding.classification = Classification.REACHABLE
+            finding.confidence = Confidence.MEDIUM
+        elif symbol_status == "symbol_referenced":
+            finding.classification = Classification.POTENTIALLY_REACHABLE
+            finding.confidence = Confidence.MEDIUM
+        elif symbol_status == "symbol_not_referenced" and status in ("referenced_in_entry_point", "referenced"):
+            finding.classification = Classification.POTENTIALLY_REACHABLE
+            finding.confidence = Confidence.LOW
+        elif status == "referenced_in_entry_point":
             finding.classification = Classification.POTENTIALLY_REACHABLE
             finding.confidence = Confidence.MEDIUM
         elif status == "referenced":

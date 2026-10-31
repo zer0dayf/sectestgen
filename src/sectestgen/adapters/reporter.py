@@ -134,6 +134,15 @@ def _render_sca_row(finding: Finding) -> str:
     evidence_lines = finding.reachability.path if finding.reachability else []
     notes = html.escape(finding.reachability.notes or "") if finding.reachability else ""
     evidence = "<br>".join(f"<code>{html.escape(line)}</code>" for line in evidence_lines)
+    status = usage.get("status", "-")
+    if usage.get("symbol_status"):
+        status = f"{status} / {usage['symbol_status']}"
+    symbols = usage.get("symbols") or {}
+    if symbols.get("known"):
+        evidence += (
+            f"<br><small>vulnerable symbols ({html.escape(', '.join(symbols.get('sources', [])))}): "
+            f"{html.escape(', '.join(symbols['known']))}</small>"
+        )
 
     return (
         "<tr>"
@@ -142,7 +151,7 @@ def _render_sca_row(finding: Finding) -> str:
         f"<td class=\"sev-{finding.severity.value}\">{finding.severity.value}</td>"
         f"<td>{package}</td>"
         f"<td>{html.escape(finding.fixed_version or '-')}</td>"
-        f"<td>{html.escape(usage.get('status', '-'))}<br><small>{notes}</small>"
+        f"<td>{html.escape(status)}<br><small>{notes}</small>"
         f"{'<br>' + evidence if evidence else ''}</td>"
         f"<td class=\"cls-{finding.classification.value}\">{finding.classification.value}"
         f"<br><small>confidence: {finding.confidence.value}</small></td>"

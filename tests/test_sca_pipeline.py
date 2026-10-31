@@ -30,7 +30,7 @@ def test_python_pipeline_writes_report2(tmp_path):
     html = (tmp_path / "report2.html").read_text(encoding="utf-8")
     assert "Report 2" in html
     assert "CVE-2020-14343" in html
-    assert result.counts_by_classification() == {"POTENTIALLY_REACHABLE": 1, "NOT_OBSERVED": 3}
+    assert result.counts_by_classification() == {"REACHABLE": 1, "NOT_OBSERVED": 3}
 
 
 def test_bad_sbom_is_reported_not_raised(tmp_path):

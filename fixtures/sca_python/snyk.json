@@ -1,0 +1,60 @@
+{
+  "ok": false,
+  "packageManager": "pip",
+  "projectName": "sca_python",
+  "displayTargetFile": "requirements.txt",
+  "dependencyCount": 5,
+  "vulnerabilities": [
+    {
+      "id": "SNYK-PYTHON-PYYAML-590151",
+      "title": "Arbitrary Code Execution",
+      "severity": "critical",
+      "cvssScore": 9.8,
+      "packageName": "pyyaml",
+      "version": "5.3.1",
+      "from": ["sca_python@0.0.0", "pyyaml@5.3.1"],
+      "identifiers": {"CVE": ["CVE-2020-14343"], "CWE": ["CWE-20"]},
+      "fixedIn": ["5.4"],
+      "description": "PyYAML full_load/FullLoader arbitrary code execution.",
+      "functions": [
+        {"functionId": {"filePath": "yaml/__init__.py", "functionName": "full_load"}, "version": ["[,5.4)"]}
+      ]
+    },
+    {
+      "id": "SNYK-PYTHON-JINJA2-174126",
+      "title": "Sandbox Escape",
+      "severity": "high",
+      "cvssScore": 8.6,
+      "packageName": "jinja2",
+      "version": "2.10",
+      "from": ["sca_python@0.0.0", "jinja2@2.10"],
+      "identifiers": {"CVE": ["CVE-2019-10906"], "CWE": ["CWE-693"]},
+      "fixedIn": ["2.10.1"],
+      "description": "Jinja2 str.format_map sandbox escape."
+    },
+    {
+      "id": "SNYK-PYTHON-REQUESTS-72435",
+      "title": "Information Exposure",
+      "severity": "high",
+      "cvssScore": 7.5,
+      "packageName": "requests",
+      "version": "2.19.1",
+      "from": ["sca_python@0.0.0", "requests@2.19.1"],
+      "identifiers": {"CVE": ["CVE-2018-18074"], "CWE": ["CWE-200"]},
+      "fixedIn": ["2.20.0"],
+      "description": "requests sends Authorization header on HTTPS-to-HTTP redirect."
+    },
+    {
+      "id": "SNYK-PYTHON-URLLIB3-174323",
+      "title": "Improper Certificate Validation",
+      "severity": "high",
+      "cvssScore": 7.5,
+      "packageName": "urllib3",
+      "version": "1.23",
+      "from": ["sca_python@0.0.0", "requests@2.19.1", "urllib3@1.23"],
+      "identifiers": {"CVE": ["CVE-2019-11324"], "CWE": ["CWE-295"]},
+      "fixedIn": ["1.24.2"],
+      "description": "urllib3 certificate validation with custom CA certificates."
+    }
+  ]
+}

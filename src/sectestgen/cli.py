@@ -2,7 +2,7 @@
 
 Each subcommand maps to a pipeline described in the project proposal:
 `static` (Semgrep/Bandit/CodeQL -> reachability -> Report 1) and
-`sca` (CycloneDX/Dependency-Track/Grype -> import-usage evidence ->
+`sca` (CycloneDX/Dependency-Track/Grype/Snyk -> import/symbol-usage evidence ->
 Report 2).
 """
 
@@ -75,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument("--all", action="store_true", help="Fetch every known pack.")
 
     sca_parser = subparsers.add_parser(
-        "sca", help="SBOM/dependency exposure validation pipeline (CycloneDX/Grype) -> Report 2."
+        "sca", help="SBOM/dependency exposure validation pipeline (CycloneDX/Grype/Snyk) -> Report 2."
     )
     sca_parser.add_argument("sbom", help="Path to a CycloneDX JSON SBOM.")
     sca_parser.add_argument(
@@ -86,6 +86,15 @@ def build_parser() -> argparse.ArgumentParser:
     sca_parser.add_argument(
         "--grype",
         help="Pre-generated Grype JSON report (default: run `grype` from PATH if installed).",
+    )
+    sca_parser.add_argument(
+        "--snyk",
+        help="Pre-generated `snyk test --json` report (Snyk is never run by sectestgen).",
+    )
+    sca_parser.add_argument(
+        "--symbols",
+        help="JSON file of extra vulnerable-symbol metadata "
+        '([{"advisory": "CVE-...", "purl": "pkg:...", "symbols": [...]}]).',
     )
     sca_parser.add_argument(
         "-o",
@@ -126,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.source) if args.source else sbom.parent,
             output_dir=Path(args.output),
             grype_report=Path(args.grype) if args.grype else None,
+            snyk_report=Path(args.snyk) if args.snyk else None,
+            symbols_file=Path(args.symbols) if args.symbols else None,
         )
         _print_summary("sca", "Report 2", result)
         return 0

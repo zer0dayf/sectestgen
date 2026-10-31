@@ -58,3 +58,15 @@ def test_static_accepts_extra_rules(tmp_path, capsys, monkeypatch):
 
     assert exit_code == 0
     assert seen["extra_rules"] == [Path("a.yml"), Path("more-rules")]
+
+
+def test_sca_accepts_snyk_report(tmp_path, capsys):
+    python = FIXTURE.parent / "sca_python"
+    exit_code = main(
+        ["sca", str(python / "sbom.cdx.json"), "--snyk", str(python / "snyk.json"), "-o", str(tmp_path)]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "[sca] 4 finding(s)" in captured.out
+    assert "(NOT_OBSERVED=3, REACHABLE=1)" in captured.out

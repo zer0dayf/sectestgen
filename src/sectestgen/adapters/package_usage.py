@@ -16,11 +16,19 @@ code would import (`PyYAML` -> `yaml`, `log4j-core` ->
 
 The result is recorded as `finding.raw["usage"]` (a `status` plus import
 and reference locations) and a `ReachabilityEvidence` whose `path` lists
-those locations. `reachable` is always left `None`: without
-vulnerable-symbol metadata, import/reference evidence can't prove that the
-vulnerable code path runs, and absence of an import can't prove it doesn't
-(a transitive dependency may be exercised through its parent).
-`SCAClassifier` turns `status` into a classification.
+those locations. Absence of an import can't prove the vulnerable code never
+runs (a transitive dependency may be exercised through its parent).
+
+Symbol level: when the advisory's vulnerable symbols are known (provider
+metadata or `VulnerableSymbolDB`), references are resolved to qualified
+names - Python through import aliases (`import yaml as y; y.load` ->
+`yaml.load`), Java through imports and declared variable types
+(`Logger log; log.info(..)` -> `org.apache.logging.log4j.Logger.info`) -
+and matched against them (`usage["symbol_status"]`). Only a vulnerable
+symbol referenced inside an entry point sets `reachable=True`; argument
+values are not checked. Without symbol metadata `reachable` stays `None`,
+since a package reference can't show the vulnerable path runs.
+`SCAClassifier` turns `status`/`symbol_status` into a classification.
 """
 
 from __future__ import annotations
@@ -29,11 +37,15 @@ import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from sectestgen.adapters.cyclonedx import SBOM, purl_type
 from sectestgen.core.adapters import ReachabilityEngine
 from sectestgen.core.models import Finding, ReachabilityEvidence
+
+if TYPE_CHECKING:
+    from sectestgen.adapters.vulnerable_symbols import VulnerableSymbolDB
 
 # Usage statuses, strongest evidence first.
 REFERENCED_IN_ENTRY_POINT = "referenced_in_entry_point"
@@ -42,6 +54,11 @@ IMPORTED_ONLY = "imported_only"
 NOT_IMPORTED = "not_imported"
 NO_SOURCES = "no_sources"
 UNSUPPORTED = "unsupported"
+
+# Symbol statuses (only set when the advisory's vulnerable symbols are known).
+SYMBOL_REFERENCED_IN_ENTRY_POINT = "symbol_referenced_in_entry_point"
+SYMBOL_REFERENCED = "symbol_referenced"
+SYMBOL_NOT_REFERENCED = "symbol_not_referenced"
 
 # PyPI distribution name -> top-level import names, for distributions whose
 # import name differs from the normalized distribution name.
@@ -87,6 +104,11 @@ _JAVA_COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 _JAVA_ENTRY_POINT_RE = re.compile(
     r"@(RestController|Controller|RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\b"
 )
+# `Type<..> name =|;|,|)` - field, local and parameter declarations.
+_JAVA_DECL_RE = re.compile(r"\b([A-Z][\w$]*)\s*(?:<[^;(){}]*?>)?\s+([A-Za-z_$][\w$]*)\s*(?=[=;,)])")
+_JAVA_CALL_RE = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(")
+_JAVA_NEW_RE = re.compile(r"\bnew\s+([A-Z][\w$]*)\s*(?:<[^;(){}]*?>)?\s*\(")
+_JAVA_BARE_CALL_RE = re.compile(r"(?<![\w$.])([a-z_$][\w$]*)\s*\(")
 
 
 @dataclass
@@ -105,6 +127,9 @@ class _SourceIndex:
     # file -> [(start_line, end_line, label)] entry-point ranges; a file-wide
     # entry point (Java controller) is a single range covering the file
     entry_points: dict[str, list[tuple[int, int, str]]] = field(default_factory=dict)
+    # file -> [(line, qualified name)] of references resolved through imports
+    qualified: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
+    language: str = "python"
     file_count: int = 0
 
 
@@ -152,9 +177,17 @@ def import_names_for(purl: str | None) -> tuple[list[str], str]:
 
 
 class ImportUsageReachabilityEngine(ReachabilityEngine):
-    def __init__(self, sbom: SBOM | None = None, routes: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        sbom: SBOM | None = None,
+        routes: list[dict] | None = None,
+        symbols: VulnerableSymbolDB | None = None,
+    ) -> None:
+        """`symbols`: extra vulnerable-symbol metadata; without it only the
+        provider's own metadata (`raw["vulnerable_symbols"]`) is used."""
         self.sbom = sbom
         self.routes = routes or []
+        self.symbols = symbols
         self._indexes: dict[tuple[str, str], _SourceIndex] = {}
 
     def analyze(self, finding: Finding, target: Path) -> Finding:
@@ -226,9 +259,35 @@ class ImportUsageReachabilityEngine(ReachabilityEngine):
         if mapping == "heuristic":
             notes += f" (import names {names} guessed from package coordinates)"
 
+        reachable = None
+        symbols, sources = self._known_symbols(finding)
+        if symbols and matched:  # not imported -> package-level evidence already says it all
+            hits, in_entry = _symbol_references(index, symbols, target)
+            usage["symbols"] = {"known": symbols, "sources": sources, "references": hits, "in_entry_point": in_entry}
+            if in_entry:
+                usage["symbol_status"] = SYMBOL_REFERENCED_IN_ENTRY_POINT
+                path, reachable = in_entry, True
+                notes = "vulnerable symbol referenced inside an entry point (argument values not checked)"
+            elif hits:
+                usage["symbol_status"] = SYMBOL_REFERENCED
+                path = hits
+                notes = "vulnerable symbol referenced, but not inside a discovered entry point"
+            else:
+                usage["symbol_status"] = SYMBOL_NOT_REFERENCED
+                notes += (
+                    f"; none of the {len(symbols)} known vulnerable symbol(s) is referenced directly"
+                    " (the package's own code may still reach them)"
+                )
+
         finding.raw["usage"] = usage
-        finding.reachability = ReachabilityEvidence(path=path, reachable=None, notes=notes)
+        finding.reachability = ReachabilityEvidence(path=path, reachable=reachable, notes=notes)
         return finding
+
+    def _known_symbols(self, finding: Finding) -> tuple[list[str], list[str]]:
+        if self.symbols is not None:
+            return self.symbols.symbols_for(finding)
+        known = finding.raw.get("vulnerable_symbols") or {}
+        return list(known.get("symbols", [])), list(known.get("sources", []))
 
     def _index(self, target: Path, language: str) -> _SourceIndex:
         key = (str(target), language)
@@ -251,6 +310,40 @@ def _references_for(imp: _Import, index: _SourceIndex) -> list[tuple[int, str]]:
         return [(imp.line, f"wildcard import {imp.module}.*")]
     wanted = set(imp.bound_names)
     return [(line, f"uses {name}") for line, name in refs if name in wanted and line != imp.line]
+
+
+def _symbol_references(index: _SourceIndex, symbols: list[str], target: Path) -> tuple[list[str], list[str]]:
+    hits: set[str] = set()
+    in_entry: set[str] = set()
+    for file_path, refs in index.qualified.items():
+        for line, ref in refs:
+            for symbol in symbols:
+                kind = _symbol_match(ref, symbol, index.language)
+                if kind is None:
+                    continue
+                location = f"{_rel(file_path, target)}:{line}"
+                label = (
+                    f"{location} uses {ref}"
+                    if kind == "exact"
+                    else f"{location} uses class {ref} (call to {symbol} not resolvable)"
+                )
+                hits.add(label)
+                entry = _entry_point_at(index, file_path, line)
+                if entry is not None:
+                    in_entry.add(f"{label} (in {entry})")
+                break
+    return sorted(hits), sorted(in_entry)
+
+
+def _symbol_match(ref: str, symbol: str, language: str) -> str | None:
+    if ref == symbol or ref.startswith(symbol + "."):
+        return "exact"
+    # Python instances aren't typed, so `mod.Class.method` can only be matched
+    # as far as the class; Java calls are resolved through declared types.
+    owner = symbol.rpartition(".")[0]
+    if language == "python" and owner and ref == owner and owner.rpartition(".")[2][:1].isupper():
+        return "class"
+    return None
 
 
 def _entry_point_at(index: _SourceIndex, file_path: str, line: int) -> str | None:
@@ -277,6 +370,7 @@ def _index_python(target: Path, routes: list[dict]) -> _SourceIndex:
             continue
         index.file_count += 1
         file_path = str(py_file.resolve())
+        index.qualified[file_path] = _python_qualified(tree)
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -296,8 +390,47 @@ def _index_python(target: Path, routes: list[dict]) -> _SourceIndex:
     return index
 
 
+def _python_qualified(tree: ast.AST) -> list[tuple[int, str]]:
+    """Name/attribute references whose head is an imported name, rewritten to
+    the imported module path (`from yaml import load as L; L()` -> `yaml.load`)."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    aliases[alias.asname] = alias.name
+                else:
+                    head = alias.name.split(".", 1)[0]
+                    aliases[head] = head
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                if alias.name != "*":
+                    aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+
+    refs: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Attribute, ast.Name)):
+            continue
+        dotted = _dotted(node)
+        if dotted is None:
+            continue
+        head, _, rest = dotted.partition(".")
+        if head in aliases:
+            refs.append((node.lineno, aliases[head] + (f".{rest}" if rest else "")))
+    return refs
+
+
+def _dotted(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return f"{base}.{node.attr}" if base else None
+    return None
+
+
 def _index_java(target: Path) -> _SourceIndex:
-    index = _SourceIndex()
+    index = _SourceIndex(language="java")
     files = [target] if target.is_file() else sorted(target.rglob("*.java"))
     for java_file in files:
         try:
@@ -310,17 +443,26 @@ def _index_java(target: Path) -> _SourceIndex:
         code = _JAVA_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), source)
 
         import_lines: set[int] = set()
+        classes: dict[str, str] = {}  # simple class name -> FQN
+        static_members: dict[str, str] = {}  # statically imported member -> owner FQN
+        wildcard_packages: list[str] = []
         for match in _JAVA_IMPORT_RE.finditer(code):
             line = code.count("\n", 0, match.start()) + 1
             import_lines.add(line)
             is_static, name, wildcard = match.group(1), match.group(2), match.group(3)
             if wildcard:
                 index.imports.append(_Import(name, file_path, line, ["*"]))
+                if not is_static:
+                    wildcard_packages.append(name)
                 continue
             # `import a.b.C;` binds C (package a.b); `import static a.b.C.m;` binds m.
             owner, _, simple = name.rpartition(".")
             module = owner.rpartition(".")[0] if is_static else owner
             index.imports.append(_Import(module, file_path, line, [simple]))
+            if is_static:
+                static_members[simple] = owner
+            else:
+                classes[simple] = name
 
         refs = index.references.setdefault(file_path, [])
         for line_no, text in enumerate(code.splitlines(), start=1):
@@ -329,6 +471,52 @@ def _index_java(target: Path) -> _SourceIndex:
             for word in re.findall(r"\b[A-Za-z_]\w*\b", text):
                 refs.append((line_no, word))
 
+        index.qualified[file_path] = _java_qualified(code, import_lines, classes, static_members, wildcard_packages)
+
         if _JAVA_ENTRY_POINT_RE.search(code):
             index.entry_points[file_path] = [(1, code.count("\n") + 1, f"controller {java_file.stem}")]
     return index
+
+
+def _java_qualified(
+    code: str,
+    import_lines: set[int],
+    classes: dict[str, str],
+    static_members: dict[str, str],
+    wildcard_packages: list[str],
+) -> list[tuple[int, str]]:
+    """Class references and method calls resolved to `pkg.Class[.method]`.
+    Variable types come from declarations anywhere in the file (scopes are
+    not tracked); a class from a wildcard import resolves to every wildcard
+    package as a candidate."""
+
+    def resolve(simple: str) -> list[str]:
+        if simple in classes:
+            return [classes[simple]]
+        if simple[:1].isupper():
+            return [f"{pkg}.{simple}" for pkg in wildcard_packages]
+        return []
+
+    variables: dict[str, str] = {}
+    for match in _JAVA_DECL_RE.finditer(code):
+        if resolve(match.group(1)):
+            variables[match.group(2)] = match.group(1)
+
+    refs: list[tuple[int, str]] = []
+    for line_no, text in enumerate(code.splitlines(), start=1):
+        if line_no in import_lines:
+            continue
+        for match in _JAVA_CALL_RE.finditer(text):
+            receiver, method = match.groups()
+            for owner in resolve(variables.get(receiver, receiver)):
+                refs.append((line_no, f"{owner}.{method}"))
+        for match in _JAVA_NEW_RE.finditer(text):
+            for owner in resolve(match.group(1)):
+                refs.append((line_no, f"{owner}.<init>"))
+        for match in _JAVA_BARE_CALL_RE.finditer(text):
+            if match.group(1) in static_members:
+                refs.append((line_no, f"{static_members[match.group(1)]}.{match.group(1)}"))
+        for word in set(re.findall(r"\b[A-Z][\w$]*\b", text)):
+            for owner in resolve(word):
+                refs.append((line_no, owner))
+    return refs

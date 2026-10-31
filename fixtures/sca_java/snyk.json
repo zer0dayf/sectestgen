@@ -1,0 +1,43 @@
+{
+  "ok": false,
+  "packageManager": "maven",
+  "projectName": "com.example:sca-fixture",
+  "displayTargetFile": "pom.xml",
+  "dependencyCount": 4,
+  "vulnerabilities": [
+    {
+      "id": "SNYK-JAVA-ORGAPACHELOGGINGLOG4J-2314720",
+      "title": "Remote Code Execution (RCE)",
+      "severity": "critical",
+      "cvssScore": 10.0,
+      "packageName": "org.apache.logging.log4j:log4j-core",
+      "version": "2.14.1",
+      "from": ["com.example:sca-fixture@0.0.1", "org.apache.logging.log4j:log4j-core@2.14.1"],
+      "identifiers": {"CVE": ["CVE-2021-44228"], "CWE": ["CWE-502"]},
+      "fixedIn": ["2.15.0"],
+      "description": "Log4Shell: JNDI lookups in logged messages.",
+      "functions_new": [
+        {
+          "functionId": {
+            "className": "JndiLookup",
+            "filePath": "org/apache/logging/log4j/core/lookup/JndiLookup.class",
+            "functionName": "lookup"
+          },
+          "version": ["[2.0-beta9,2.15.0)"]
+        }
+      ]
+    },
+    {
+      "id": "SNYK-JAVA-ORGAPACHECOMMONS-3043138",
+      "title": "Arbitrary Code Execution",
+      "severity": "critical",
+      "cvssScore": 9.8,
+      "packageName": "org.apache.commons:commons-text",
+      "version": "1.9",
+      "from": ["com.example:sca-fixture@0.0.1", "org.apache.commons:commons-text@1.9"],
+      "identifiers": {"CVE": ["CVE-2022-42889"], "CWE": ["CWE-94"]},
+      "fixedIn": ["1.10.0"],
+      "description": "Text4Shell: default interpolator lookups (script, dns, url)."
+    }
+  ]
+}

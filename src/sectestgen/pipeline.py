@@ -2,9 +2,9 @@
 
 - Static (WP1): Semgrep/Bandit -> FastAPI/Spring source/sink correlation
   -> bounded Python/Java reachability -> classification -> Report 1.
-- SCA (WP2): CycloneDX SBOM (+ embedded vulnerabilities) / Grype ->
-  de-duplication on purl + CVE -> Python/Java import-usage evidence ->
-  classification -> Report 2.
+- SCA (WP2): CycloneDX SBOM (+ embedded vulnerabilities) / Grype / Snyk
+  -> de-duplication on purl + CVE -> Python/Java import- and
+  vulnerable-symbol-usage evidence -> classification -> Report 2.
 
 Kept separate from `cli.py` so the pipelines are testable without going
 through argparse.
@@ -26,7 +26,9 @@ from sectestgen.adapters.package_usage import ImportUsageReachabilityEngine
 from sectestgen.adapters.reachability import BoundedReachabilityEngine
 from sectestgen.adapters.reporter import HTMLReporter, JSONReporter
 from sectestgen.adapters.semgrep_adapter import DEFAULT_RULES_PATHS, SemgrepAdapter
+from sectestgen.adapters.snyk_adapter import SnykAdapter
 from sectestgen.adapters.spring_adapter import SpringFrameworkAdapter
+from sectestgen.adapters.vulnerable_symbols import VulnerableSymbolDB
 from sectestgen.core.adapters import SCAAdapter, StaticAnalyzerAdapter
 from sectestgen.core.models import Finding, Pipeline
 
@@ -98,16 +100,28 @@ def run_sca_pipeline(
     output_dir: Path | None = None,
     grype_report: Path | None = None,
     adapters: list[SCAAdapter] | None = None,
+    snyk_report: Path | None = None,
+    symbols_file: Path | None = None,
 ) -> PipelineResult:
-    """`source` is the project the SBOM describes; it's only read, never run."""
+    """`source` is the project the SBOM describes; it's only read, never run.
+    `snyk_report` is a pre-generated `snyk test --json` file (Snyk is never
+    run from here); `symbols_file` adds vulnerable-symbol metadata on top of
+    the curated table (see `vulnerable_symbols.py`)."""
     sbom = Path(sbom).resolve()
     source = Path(source).resolve()
     if adapters is None:
         adapters = [CycloneDXAdapter()]
         if grype_report is not None or shutil.which("grype"):
             adapters.append(GrypeAdapter(report=grype_report))
+        if snyk_report is not None:
+            adapters.append(SnykAdapter(report=snyk_report))
 
     errors: list[str] = []
+    try:
+        symbol_db = VulnerableSymbolDB.with_file(symbols_file)
+    except (OSError, ValueError) as exc:
+        symbol_db = VulnerableSymbolDB()
+        errors.append(f"symbols: {exc}")
     try:
         sbom_index = load_sbom(sbom)
     except (OSError, ValueError) as exc:
@@ -124,7 +138,7 @@ def run_sca_pipeline(
     findings = deduplicate_sca(findings)
 
     routes = list(FastAPIFrameworkAdapter().discover_routes(source)) if source.exists() else []
-    usage_engine = ImportUsageReachabilityEngine(sbom_index, routes)
+    usage_engine = ImportUsageReachabilityEngine(sbom_index, routes, symbol_db)
     classifier = SCAClassifier()
     for finding in findings:
         usage_engine.analyze(finding, source)
@@ -156,4 +170,15 @@ def deduplicate_sca(findings: list[Finding]) -> list[Finding]:
         if finding.tool != existing.tool and finding.tool not in also:
             also.append(finding.tool)
         existing.fixed_version = existing.fixed_version or finding.fixed_version
+        _merge_symbols(existing, finding)
     return list(kept.values())
+
+
+def _merge_symbols(existing: Finding, duplicate: Finding) -> None:
+    """Keep vulnerable-symbol metadata a later provider (e.g. Snyk) adds."""
+    extra = duplicate.raw.get("vulnerable_symbols")
+    if not extra:
+        return
+    merged = existing.raw.setdefault("vulnerable_symbols", {"symbols": [], "sources": []})
+    for key in ("symbols", "sources"):
+        merged[key].extend(v for v in extra.get(key, []) if v not in merged[key])
