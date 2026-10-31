@@ -148,7 +148,16 @@ class SemgrepAdapter(StaticAnalyzerAdapter):
     def _run_local(self, binary_path: str, target: Path) -> dict:
         cmd = [binary_path, "scan", "--json", "--quiet", "--metrics=off", "--disable-version-check"]
         for cfg in self.config_paths:
-            cmd += ["--config", cfg]
+            if Path(cfg).is_dir():
+                # Same filter as the docker runner: a rule collection's CI and
+                # tooling YAML would make Semgrep reject the whole config.
+                rule_files = list(iter_rule_files(Path(cfg)))
+                if not rule_files:
+                    raise RuntimeError(f"no Semgrep rule files found under {str(cfg)!r}")
+                for rule_file in rule_files:
+                    cmd += ["--config", str(rule_file)]
+            else:
+                cmd += ["--config", str(cfg)]
         cmd.append(str(target))
         return self._execute(cmd)
 
