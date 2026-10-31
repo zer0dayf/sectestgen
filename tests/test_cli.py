@@ -92,3 +92,13 @@ def test_scan_writes_three_reports(tmp_path, capsys):
 def test_sandbox_without_subcommand_prints_help(capsys):
     with pytest.raises(SystemExit):
         main(["sandbox"])
+
+
+def test_python_dash_m_sectestgen_runs_the_cli():
+    import subprocess
+    import sys
+
+    proc = subprocess.run([sys.executable, "-m", "sectestgen", "--version"], capture_output=True, text=True)
+
+    assert proc.returncode == 0
+    assert proc.stdout.strip()

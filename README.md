@@ -91,6 +91,14 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+`python -m sectestgen ...` works everywhere the `sectestgen` command does. Use it
+on Windows when the generated `sectestgen.exe` launcher is blocked by
+Application Control, or when another `sectestgen` is earlier on `PATH`:
+
+```powershell
+.\.venv\Scripts\python.exe -m sectestgen scan fixtures\vulnerable_fastapi --validate -o sectestgen-out
+```
+
 `bandit` comes with the `dev` extra. `semgrep` does too, except on Windows,
 which has no native build: there (or wherever the `semgrep` binary is
 missing or blocked) `SemgrepAdapter` runs the pinned `semgrep/semgrep`
