@@ -5,6 +5,11 @@
 - SCA (WP2): CycloneDX SBOM (+ embedded vulnerabilities) / Grype / Snyk
   -> de-duplication on purl + CVE -> Python/Java import- and
   vulnerable-symbol-usage evidence -> classification -> Report 2.
+- Runtime validation (WP3, opt-in `validate=True`): supported findings
+  of either pipeline are re-run in the Docker sandbox and re-classified
+  (CONFIRMED only on observed runtime evidence).
+- Unified (WP3): both pipelines -> Report 1 + Report 2 + the merged,
+  de-duplicated Report 3.
 
 Kept separate from `cli.py` so the pipelines are testable without going
 through argparse.
@@ -24,13 +29,15 @@ from sectestgen.adapters.grype_adapter import GrypeAdapter
 from sectestgen.adapters.java_reachability import JavaReachabilityEngine
 from sectestgen.adapters.package_usage import ImportUsageReachabilityEngine
 from sectestgen.adapters.reachability import BoundedReachabilityEngine
-from sectestgen.adapters.reporter import HTMLReporter, JSONReporter
+from sectestgen.adapters.reporter import HTMLIssueReporter, HTMLReporter, JSONIssueReporter, JSONReporter
 from sectestgen.adapters.semgrep_adapter import DEFAULT_RULES_PATHS, SemgrepAdapter
 from sectestgen.adapters.snyk_adapter import SnykAdapter
 from sectestgen.adapters.spring_adapter import SpringFrameworkAdapter
 from sectestgen.adapters.vulnerable_symbols import VulnerableSymbolDB
 from sectestgen.core.adapters import SCAAdapter, StaticAnalyzerAdapter
 from sectestgen.core.models import Finding, Pipeline
+from sectestgen.sandbox.executor import DockerSandboxExecutor
+from sectestgen.unified import Issue, build_issues
 
 
 @dataclass
@@ -47,6 +54,44 @@ class PipelineResult:
             counts[finding.classification.value] = counts.get(finding.classification.value, 0) + 1
         return counts
 
+    def validation_counts(self) -> dict[str, int]:
+        counts = {"observed": 0, "not_observed": 0, "not_validated": 0}
+        for finding in self.findings:
+            if finding.runtime is not None:
+                key = {True: "observed", False: "not_observed", None: "not_validated"}[finding.runtime.observed]
+                counts[key] += 1
+        return counts
+
+
+@dataclass
+class UnifiedResult:
+    static: PipelineResult
+    sca: PipelineResult | None
+    issues: list[Issue]
+    report_json: Path | None = None
+    report_html: Path | None = None
+
+    @property
+    def errors(self) -> list[str]:
+        return [*self.static.errors, *(self.sca.errors if self.sca else [])]
+
+
+def _validate(
+    findings: list[Finding],
+    target: Path,
+    routes: list[dict],
+    classifier,
+    sandbox: DockerSandboxExecutor | None,
+    errors: list[str],
+) -> None:
+    executor = sandbox or DockerSandboxExecutor(routes)
+    executor.routes = routes
+    executor.execute_many(findings, target)
+    if executor.last_error:
+        errors.append(f"sandbox: {executor.last_error}")
+    for finding in findings:
+        classifier.classify(finding)
+
 
 def run_static_pipeline(
     target: Path,
@@ -54,10 +99,13 @@ def run_static_pipeline(
     analyzers: list[StaticAnalyzerAdapter] | None = None,
     extra_rules: list[Path] | None = None,
     semgrep_timeout: int = 300,
+    validate: bool = False,
+    sandbox: DockerSandboxExecutor | None = None,
 ) -> PipelineResult:
     """`extra_rules`: additional Semgrep rule files/directories run alongside
     the project's own packs; `semgrep_timeout` in seconds (both ignored when
-    `analyzers` is given)."""
+    `analyzers` is given). `validate` runs supported findings in the Docker
+    sandbox (`sandbox` overrides the default executor)."""
     target = Path(target).resolve()
     if analyzers is None:
         rules = [*DEFAULT_RULES_PATHS, *(extra_rules or [])]
@@ -83,6 +131,8 @@ def run_static_pipeline(
         is_java = finding.location is not None and finding.location.file_path.endswith(".java")
         (java_engine if is_java else python_engine).analyze(finding, target)
         classifier.classify(finding)
+    if validate:
+        _validate(findings, target, routes, classifier, sandbox, errors)
 
     result = PipelineResult(findings=findings, routes=routes, errors=errors)
 
@@ -102,6 +152,8 @@ def run_sca_pipeline(
     adapters: list[SCAAdapter] | None = None,
     snyk_report: Path | None = None,
     symbols_file: Path | None = None,
+    validate: bool = False,
+    sandbox: DockerSandboxExecutor | None = None,
 ) -> PipelineResult:
     """`source` is the project the SBOM describes; it's only read, never run.
     `snyk_report` is a pre-generated `snyk test --json` file (Snyk is never
@@ -143,6 +195,8 @@ def run_sca_pipeline(
     for finding in findings:
         usage_engine.analyze(finding, source)
         classifier.classify(finding)
+    if validate and source.exists():
+        _validate(findings, source, routes, classifier, sandbox, errors)
 
     result = PipelineResult(findings=findings, routes=routes, errors=errors)
 
@@ -151,6 +205,40 @@ def run_sca_pipeline(
         result.report_json = JSONReporter().generate(findings, output_dir / "report2.json")
         result.report_html = HTMLReporter(Pipeline.SCA).generate(findings, output_dir / "report2.html")
 
+    return result
+
+
+def run_unified_pipeline(
+    target: Path,
+    output_dir: Path | None = None,
+    sbom: Path | None = None,
+    grype_report: Path | None = None,
+    snyk_report: Path | None = None,
+    symbols_file: Path | None = None,
+    validate: bool = False,
+    sandbox: DockerSandboxExecutor | None = None,
+    analyzers: list[StaticAnalyzerAdapter] | None = None,
+    extra_rules: list[Path] | None = None,
+    semgrep_timeout: int = 300,
+) -> UnifiedResult:
+    """Static pipeline on `target`, SCA pipeline when an SBOM is given (its
+    source is `target`), then Report 3 over both."""
+    static = run_static_pipeline(
+        target, output_dir, analyzers=analyzers, extra_rules=extra_rules,
+        semgrep_timeout=semgrep_timeout, validate=validate, sandbox=sandbox,
+    )
+    sca = None
+    if sbom is not None:
+        sca = run_sca_pipeline(
+            sbom, target, output_dir, grype_report=grype_report, snyk_report=snyk_report,
+            symbols_file=symbols_file, validate=validate, sandbox=sandbox,
+        )
+    issues = build_issues(static.findings, sca.findings if sca else [])
+    result = UnifiedResult(static=static, sca=sca, issues=issues)
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        result.report_json = JSONIssueReporter().generate(issues, output_dir / "report3.json")
+        result.report_html = HTMLIssueReporter().generate(issues, output_dir / "report3.html")
     return result
 
 

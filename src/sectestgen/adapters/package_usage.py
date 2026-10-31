@@ -42,7 +42,7 @@ from urllib.parse import unquote
 
 from sectestgen.adapters.cyclonedx import SBOM, purl_type
 from sectestgen.core.adapters import ReachabilityEngine
-from sectestgen.core.models import Finding, ReachabilityEvidence
+from sectestgen.core.models import Finding, ReachabilityEvidence, SourceLocation
 
 if TYPE_CHECKING:
     from sectestgen.adapters.vulnerable_symbols import VulnerableSymbolDB
@@ -262,12 +262,19 @@ class ImportUsageReachabilityEngine(ReachabilityEngine):
         reachable = None
         symbols, sources = self._known_symbols(finding)
         if symbols and matched:  # not imported -> package-level evidence already says it all
-            hits, in_entry = _symbol_references(index, symbols, target)
-            usage["symbols"] = {"known": symbols, "sources": sources, "references": hits, "in_entry_point": in_entry}
+            hits, in_entry, sites = _symbol_references(index, symbols, target)
+            usage["symbols"] = {
+                "known": symbols,
+                "sources": sources,
+                "references": hits,
+                "in_entry_point": in_entry,
+                "sites": [{"file_path": f, "line": line, "entry_point": e} for f, line, e in sites],
+            }
             if in_entry:
                 usage["symbol_status"] = SYMBOL_REFERENCED_IN_ENTRY_POINT
                 path, reachable = in_entry, True
                 notes = "vulnerable symbol referenced inside an entry point (argument values not checked)"
+                self._attach_entry_point(finding, sites)
             elif hits:
                 usage["symbol_status"] = SYMBOL_REFERENCED
                 path = hits
@@ -288,6 +295,26 @@ class ImportUsageReachabilityEngine(ReachabilityEngine):
             return self.symbols.symbols_for(finding)
         known = finding.raw.get("vulnerable_symbols") or {}
         return list(known.get("symbols", [])), list(known.get("sources", []))
+
+    def _attach_entry_point(self, finding: Finding, sites: list[tuple[str, int, str | None]]) -> None:
+        """Record the first entry-point call site the way the static engines
+        do (location, route, user-input source, sink type), so the same
+        sandbox and Report 3 correlation can use SCA findings."""
+        file_path, line, label = next(s for s in sites if s[2] is not None)
+        finding.location = SourceLocation(file_path=file_path, line=line)
+        finding.raw["entry_point"] = True
+        finding.raw["route"] = label
+        if self.symbols is not None:
+            finding.sink = finding.sink or self.symbols.sink_type(finding)
+        route = next(
+            (r for r in self.routes
+             if f"{r['method']} {r['path']}" == label and str(Path(r["file_path"]).resolve()) == file_path),
+            None,
+        )
+        if route is not None and route["sources"]:
+            source = route["sources"][0]
+            field_name = f".{source['field']}" if source.get("field") else ""
+            finding.user_input_source = f"{label} :: {source['kind']}:{source['name']}{field_name}"
 
     def _index(self, target: Path, language: str) -> _SourceIndex:
         key = (str(target), language)
@@ -312,9 +339,13 @@ def _references_for(imp: _Import, index: _SourceIndex) -> list[tuple[int, str]]:
     return [(line, f"uses {name}") for line, name in refs if name in wanted and line != imp.line]
 
 
-def _symbol_references(index: _SourceIndex, symbols: list[str], target: Path) -> tuple[list[str], list[str]]:
+def _symbol_references(
+    index: _SourceIndex, symbols: list[str], target: Path
+) -> tuple[list[str], list[str], list[tuple[str, int, str | None]]]:
+    """(labels, entry-point labels, sorted (file, line, entry label) sites)."""
     hits: set[str] = set()
     in_entry: set[str] = set()
+    sites: set[tuple[str, int, str | None]] = set()
     for file_path, refs in index.qualified.items():
         for line, ref in refs:
             for symbol in symbols:
@@ -329,10 +360,11 @@ def _symbol_references(index: _SourceIndex, symbols: list[str], target: Path) ->
                 )
                 hits.add(label)
                 entry = _entry_point_at(index, file_path, line)
+                sites.add((file_path, line, entry))
                 if entry is not None:
                     in_entry.add(f"{label} (in {entry})")
                 break
-    return sorted(hits), sorted(in_entry)
+    return sorted(hits), sorted(in_entry), sorted(sites, key=lambda s: (s[0], s[1], s[2] or ""))
 
 
 def _symbol_match(ref: str, symbol: str, language: str) -> str | None:

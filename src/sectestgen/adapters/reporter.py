@@ -1,7 +1,9 @@
-"""JSON and HTML Reporters for Report 1 (static) and Report 2 (SCA).
+"""JSON and HTML Reporters for Report 1 (static), Report 2 (SCA) and the
+unified Report 3.
 
 JSON is the canonical/machine-readable output; HTML is the human-readable
-view. Both consume the same `Finding` list so they can never disagree.
+view. Both consume the same `Finding` (or `Issue`) list so they can never
+disagree.
 """
 
 from __future__ import annotations
@@ -9,10 +11,13 @@ from __future__ import annotations
 import html
 import json
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from sectestgen.core.adapters import Reporter
 from sectestgen.core.models import Finding, Pipeline
+
+if TYPE_CHECKING:
+    from sectestgen.unified import Issue
 
 _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
@@ -25,8 +30,9 @@ class JSONReporter(Reporter):
         return output_path
 
 
-_STATIC_HEADERS = ["Tool", "Rule", "Severity", "Location", "Sink / Source", "Reachability", "Classification"]
-_SCA_HEADERS = ["Tool", "Advisory", "Severity", "Package", "Fixed in", "Usage evidence", "Classification"]
+_STATIC_HEADERS = ["Tool", "Rule", "Severity", "Location", "Sink / Source", "Reachability", "Runtime", "Classification"]
+_SCA_HEADERS = ["Tool", "Advisory", "Severity", "Package", "Fixed in", "Usage evidence", "Runtime", "Classification"]
+_ISSUE_HEADERS = ["Issue", "Severity", "Location / route", "Evidence", "Classification"]
 _TITLES = {
     Pipeline.STATIC: ("Report 1 (Static)", "Report 1 (Static Pipeline)"),
     Pipeline.SCA: ("Report 2 (SCA)", "Report 2 (SCA Pipeline)"),
@@ -44,20 +50,51 @@ class HTMLReporter(Reporter):
         return output_path
 
 
-def _render(findings: list[Finding], pipeline: Pipeline) -> str:
-    counts: dict[str, int] = {}
-    for finding in findings:
-        counts[finding.classification.value] = counts.get(finding.classification.value, 0) + 1
-    summary = " &nbsp;·&nbsp; ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "no findings"
+class JSONIssueReporter:
+    """Report 3 (JSON): one entry per de-duplicated issue, members embedded."""
 
+    def generate(self, issues: Iterable[Issue], output_path: Path) -> Path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps([i.to_dict() for i in issues], indent=2), encoding="utf-8")
+        return output_path
+
+
+class HTMLIssueReporter:
+    def generate(self, issues: Iterable[Issue], output_path: Path) -> Path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        issues = list(issues)
+        member_count = sum(len(i.members) for i in issues)
+        summary = _summary(i.classification.value for i in issues)
+        page = _page(
+            "Report 3 (Unified)",
+            "Report 3 (Unified, de-duplicated)",
+            f"{len(issues)} issue(s) from {member_count} finding(s) &nbsp;·&nbsp; {summary}",
+            _ISSUE_HEADERS,
+            [_render_issue_row(i) for i in issues],
+        )
+        output_path.write_text(page, encoding="utf-8")
+        return output_path
+
+
+def _summary(values: Iterable[str]) -> str:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return " &nbsp;·&nbsp; ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "no findings"
+
+
+def _render(findings: list[Finding], pipeline: Pipeline) -> str:
     render_row = _render_sca_row if pipeline is Pipeline.SCA else _render_row
     headers = _SCA_HEADERS if pipeline is Pipeline.SCA else _STATIC_HEADERS
-    header_cells = "".join(f"<th>{h}</th>" for h in headers)
     page_title, heading = _TITLES[pipeline]
-    body_rows = "\n".join(render_row(f) for f in findings) or (
-        f'<tr><td colspan="{len(headers)}" class="empty">No findings.</td></tr>'
-    )
+    summary = _summary(f.classification.value for f in findings)
+    return _page(page_title, heading, f"{len(findings)} finding(s) &nbsp;·&nbsp; {summary}", headers,
+                 [render_row(f) for f in findings])
 
+
+def _page(page_title: str, heading: str, summary: str, headers: list[str], rows: list[str]) -> str:
+    header_cells = "".join(f"<th>{h}</th>" for h in headers)
+    body_rows = "\n".join(rows) or f'<tr><td colspan="{len(headers)}" class="empty">No findings.</td></tr>'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -76,15 +113,19 @@ def _render(findings: list[Finding], pipeline: Pipeline) -> str:
   .sev-CRITICAL, .sev-HIGH {{ color: #b00020; font-weight: 600; }}
   .sev-MEDIUM {{ color: #a66a00; font-weight: 600; }}
   .sev-LOW, .sev-INFO {{ color: #444; }}
+  .cls-CONFIRMED {{ color: #fff; background: #b00020; font-weight: 700; }}
   .cls-REACHABLE {{ color: #b00020; font-weight: 600; }}
   .cls-POTENTIALLY_REACHABLE {{ color: #a66a00; font-weight: 600; }}
   .cls-NOT_OBSERVED {{ color: #1a7f37; }}
   .cls-INCONCLUSIVE {{ color: #555; }}
+  .rt-yes {{ color: #b00020; font-weight: 600; }}
+  .rt-no {{ color: #1a7f37; }}
+  details pre {{ white-space: pre-wrap; font-size: 0.8em; max-width: 40rem; }}
 </style>
 </head>
 <body>
 <h1>SecTestGen — {heading}</h1>
-<p class="summary">{len(findings)} finding(s) &nbsp;·&nbsp; {summary}</p>
+<p class="summary">{summary}</p>
 <table>
 <thead>
 <tr>{header_cells}</tr>
@@ -116,6 +157,7 @@ def _render_row(finding: Finding) -> str:
         f"<td><code>{location}</code></td>"
         f"<td>{sink_source}</td>"
         f"<td>{reachable_label}<br><small>{notes}</small></td>"
+        f"<td>{_runtime_cell(finding)}</td>"
         f"<td class=\"cls-{finding.classification.value}\">{finding.classification.value}"
         f"<br><small>confidence: {finding.confidence.value}</small></td>"
         "</tr>"
@@ -153,7 +195,63 @@ def _render_sca_row(finding: Finding) -> str:
         f"<td>{html.escape(finding.fixed_version or '-')}</td>"
         f"<td>{html.escape(status)}<br><small>{notes}</small>"
         f"{'<br>' + evidence if evidence else ''}</td>"
+        f"<td>{_runtime_cell(finding)}</td>"
         f"<td class=\"cls-{finding.classification.value}\">{finding.classification.value}"
         f"<br><small>confidence: {finding.confidence.value}</small></td>"
+        "</tr>"
+    )
+
+
+def _runtime_cell(finding: Finding) -> str:
+    runtime = finding.runtime
+    if runtime is None:
+        return "-"
+    label, css = {True: ("observed", "rt-yes"), False: ("not observed", "rt-no"), None: ("not validated", "")}[
+        runtime.observed
+    ]
+    parts = [f'<span class="{css}">{label}</span>']
+    if runtime.observed_behavior:
+        parts.append(f"<small>{html.escape(runtime.observed_behavior)}</small>")
+    if runtime.expected_behavior:
+        parts.append(f"<small>expected: {html.escape(runtime.expected_behavior)}</small>")
+    details = []
+    if runtime.request:
+        details.append("request: " + json.dumps(runtime.request, indent=1))
+    if runtime.logs:
+        details.append(runtime.logs)
+    if details:
+        parts.append(f"<details><summary>evidence</summary><pre>{html.escape(chr(10).join(details))}</pre></details>")
+    return "<br>".join(parts)
+
+
+def _render_issue_row(issue: Issue) -> str:
+    data = issue.to_dict()
+    where = html.escape(data["location"] or "-")
+    if data["route"]:
+        where += f"<br><small>{html.escape(data['route'])}</small>"
+    evidence = []
+    for member in issue.members:
+        also = member.raw.get("also_reported_by") or []
+        tools = ", ".join([member.tool, *also])
+        what = member.cve or member.rule_id or member.title
+        note = member.reachability.notes if member.reachability else ""
+        runtime = ""
+        if member.runtime is not None:
+            runtime = {True: " · runtime: observed", False: " · runtime: not observed", None: " · runtime: not validated"}[
+                member.runtime.observed
+            ]
+        evidence.append(
+            f"<code>{html.escape(tools)}</code> {html.escape(what or '')} "
+            f"<span class=\"cls-{member.classification.value}\">{member.classification.value}</span>"
+            f"<br><small>{html.escape(note or '')}{html.escape(runtime)}</small>"
+        )
+    return (
+        "<tr>"
+        f"<td>{html.escape(data['title'])}<br><small>{', '.join(data['pipelines'])}</small></td>"
+        f"<td class=\"sev-{data['severity']}\">{data['severity']}</td>"
+        f"<td><code>{where}</code></td>"
+        f"<td>{'<br>'.join(evidence)}</td>"
+        f"<td class=\"cls-{data['classification']}\">{data['classification']}"
+        f"<br><small>confidence: {data['confidence']}</small></td>"
         "</tr>"
     )

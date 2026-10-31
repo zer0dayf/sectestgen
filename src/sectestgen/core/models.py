@@ -67,6 +67,9 @@ class RuntimeEvidence:
     expected_behavior: str | None = None
     observed_behavior: str | None = None
     logs: str | None = None
+    # True = expected behavior observed, False = ran but not observed (not
+    # proof of safety), None = not validated.
+    observed: bool | None = None
 
 
 @dataclass

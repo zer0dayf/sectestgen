@@ -22,6 +22,7 @@ _TEST_ID_SINK_TYPES = {
     "B307": "dynamic_evaluation",  # eval
     "B102": "dynamic_evaluation",  # exec_used
     "B301": "unsafe_deserialization",  # pickle.loads
+    "B506": "unsafe_deserialization",  # yaml.load (Bandit tags it CWE-20)
     "B403": "unsafe_deserialization",  # import pickle
     "B608": "sql_injection",  # hardcoded SQL expressions
     "B602": "command_execution",

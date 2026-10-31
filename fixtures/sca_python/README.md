@@ -18,4 +18,11 @@ and only list the advisories this benchmark scores against.
 
 Vulnerable symbols come from the curated table in
 `src/sectestgen/adapters/vulnerable_symbols.py` (and Snyk's `functions`).
+The pins don't resolve together with each other (requests 2.19.1 needs
+idna<2.8, current anyio needs idna>=2.8), and Jinja2 2.10 doesn't import on
+Python >= 3.10, so `.python-version` asks for 3.9 and `MarkupSafe==2.0.1`
+is pinned. `sectestgen sandbox build fixtures/sca_python` then installs the
+pins as written (best-effort mode); with `--validate`, CVE-2020-14343 is
+confirmed at runtime with the FullLoader bypass shape.
+
 Machine-readable ground truth: `ground_truth.json`.

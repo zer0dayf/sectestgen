@@ -53,8 +53,35 @@ match their ground truth.
 
 Only a known vulnerable symbol referenced inside an entry point yields
 `REACHABLE` (argument values are not checked); package-level import/usage
-evidence never does, and nothing here yields `CONFIRMED`. `NOT_OBSERVED`
-means "no use observed", not "safe".
+evidence never does. `NOT_OBSERVED` means "no use observed", not "safe".
+
+WP3 (runtime validation and Report 3), opt-in with `--validate`:
+
+- `src/sectestgen/sandbox/` runs supported findings — a Python sink inside
+  a discovered FastAPI route, with a known user-input source and one of
+  the five sink types, from either pipeline — in one disposable Docker
+  container: `--network none`, read-only root filesystem, all capabilities
+  dropped, `no-new-privileges`, unprivileged user, memory/CPU/PID limits,
+  a per-case timeout, sources streamed in as a tar (nothing mounted). The
+  app is driven in-process with FastAPI's TestClient, so no network is
+  needed.
+- Payloads are non-destructive markers: an empty marker file (command
+  execution, eval, pickle/YAML deserialization), a canary file planted by
+  the harness (path traversal), or a marker produced by SQL string
+  concatenation (SQL injection), so reflected input can't fake a result.
+- Observed → `CONFIRMED` / HIGH. Not observed → the static classification
+  is kept (not proof of safety) with LOW confidence. Not validated
+  (unsupported, Java, image missing, timeout) is recorded with the reason.
+- Report 3 merges both pipelines into issues: same file + line + sink
+  across tools, and an SCA finding joins the static issue on the line
+  where its vulnerable symbol is called.
+
+On the fixtures: all five vulnerable FastAPI endpoints are `CONFIRMED`, no
+safe counterpart is (the statically `REACHABLE` but IP-validated
+`/ping-safe` stays `REACHABLE`/LOW), and CVE-2020-14343 in
+`fixtures/sca_python/` is confirmed with the FullLoader bypass shape that
+PyYAML 5.3.1's FullLoader does not block. Java/Spring findings are not
+runtime-validated.
 
 ## Setup
 
@@ -73,6 +100,14 @@ Grype report (`--grype`), or runs `grype` itself if it's on `PATH`; without
 either it uses only the SBOM's embedded `vulnerabilities`. Snyk is read
 from a `snyk test --json` report (`--snyk`) only — sectestgen never runs
 the Snyk CLI, since that needs an account and uploads the dependency graph.
+
+Runtime validation needs Docker and a sandbox image per target, built once
+with `sectestgen sandbox build TARGET` — the only networked sandbox step
+(pip). The image uses the target's `requirements.txt` and, if present, its
+`.python-version` (3.9–3.12, default 3.11). Old pins that don't resolve
+together are installed as written with `--no-deps` and only missing
+dependencies are added (`/opt/sectestgen/install-mode` says which mode was
+used).
 
 Extra rule sets passed with `--rules` or fetched with `sectestgen rules
 fetch` are not part of this repository and keep their own license; don't
@@ -123,4 +158,11 @@ sectestgen sca path/to/sbom.cdx.json -s path/to/project --grype grype.json -o se
 # ...with a Snyk report and extra vulnerable-symbol metadata
 # symbols.json: [{"advisory": "CVE-...", "purl": "pkg:pypi/name", "symbols": ["module.func"]}]
 sectestgen sca path/to/sbom.cdx.json -s path/to/project --snyk snyk.json --symbols symbols.json
+
+# Runtime validation (Docker): build the sandbox image once, then --validate
+sectestgen sandbox build path/to/project
+sectestgen static path/to/project --validate -o sectestgen-out
+
+# Report 1 + Report 2 + unified Report 3
+sectestgen scan path/to/project --sbom sbom.cdx.json --grype grype.json --validate -o sectestgen-out
 ```

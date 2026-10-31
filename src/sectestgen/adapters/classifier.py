@@ -1,8 +1,11 @@
-"""Classifiers: turn reachability/usage evidence into Classification/Confidence.
+"""Classifiers: turn reachability/usage/runtime evidence into Classification/Confidence.
 
-CONFIRMED is intentionally never assigned here — it requires runtime
-evidence from the Docker SandboxExecutor (WP3), not static reachability
-alone.
+Static evidence alone never yields CONFIRMED. CONFIRMED (HIGH confidence)
+is assigned only when the Docker SandboxExecutor observed the expected
+behavior at runtime (`finding.runtime.observed is True`). A run that did
+not observe it keeps the static classification - non-observation is not
+proof of safety - but lowers a REACHABLE/POTENTIALLY_REACHABLE result to
+LOW confidence, since the suspected behavior could not be triggered.
 """
 
 from __future__ import annotations
@@ -11,17 +14,32 @@ from sectestgen.core.adapters import Classifier
 from sectestgen.core.models import Classification, Confidence, Finding
 
 
+def apply_runtime_evidence(finding: Finding) -> Finding:
+    runtime = finding.runtime
+    if runtime is None or runtime.observed is None:
+        return finding
+    if runtime.observed:
+        finding.classification = Classification.CONFIRMED
+        finding.confidence = Confidence.HIGH
+    elif finding.classification in (Classification.REACHABLE, Classification.POTENTIALLY_REACHABLE):
+        finding.confidence = Confidence.LOW
+    return finding
+
+
 class DefaultClassifier(Classifier):
     def classify(self, finding: Finding) -> Finding:
+        self._classify_static(finding)
+        return apply_runtime_evidence(finding)
+
+    @staticmethod
+    def _classify_static(finding: Finding) -> None:
         reachability = finding.reachability
         entry_point = bool(finding.raw.get("entry_point"))
 
         if reachability is None:
             finding.classification = Classification.INCONCLUSIVE
             finding.confidence = Confidence.LOW
-            return finding
-
-        if reachability.reachable is True:
+        elif reachability.reachable is True:
             finding.classification = Classification.REACHABLE
             finding.confidence = Confidence.MEDIUM
         elif reachability.reachable is False:
@@ -33,8 +51,6 @@ class DefaultClassifier(Classifier):
         else:
             finding.classification = Classification.INCONCLUSIVE
             finding.confidence = Confidence.LOW
-
-        return finding
 
 
 class SCAClassifier(Classifier):
@@ -50,6 +66,11 @@ class SCAClassifier(Classifier):
     """
 
     def classify(self, finding: Finding) -> Finding:
+        self._classify_usage(finding)
+        return apply_runtime_evidence(finding)
+
+    @staticmethod
+    def _classify_usage(finding: Finding) -> None:
         usage = finding.raw.get("usage") or {}
         status = usage.get("status")
         symbol_status = usage.get("symbol_status")
@@ -81,4 +102,3 @@ class SCAClassifier(Classifier):
 
         if usage.get("mapping") == "heuristic" and finding.confidence is Confidence.MEDIUM:
             finding.confidence = Confidence.LOW
-        return finding

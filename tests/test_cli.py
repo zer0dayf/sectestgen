@@ -1,3 +1,5 @@
+import pytest
+
 from pathlib import Path
 
 from sectestgen.cli import main
@@ -70,3 +72,23 @@ def test_sca_accepts_snyk_report(tmp_path, capsys):
     assert exit_code == 0
     assert "[sca] 4 finding(s)" in captured.out
     assert "(NOT_OBSERVED=3, REACHABLE=1)" in captured.out
+
+
+def test_scan_writes_three_reports(tmp_path, capsys):
+    python = FIXTURE.parent / "sca_python"
+    exit_code = main([
+        "scan", str(python), "--sbom", str(python / "sbom.cdx.json"),
+        "--grype", str(python / "grype.json"), "-o", str(tmp_path),
+    ])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    for name in ("report1", "report2", "report3"):
+        assert (tmp_path / f"{name}.json").exists()
+        assert (tmp_path / f"{name}.html").exists()
+    assert "[scan] " in captured.out and "Report 3" in captured.out
+
+
+def test_sandbox_without_subcommand_prints_help(capsys):
+    with pytest.raises(SystemExit):
+        main(["sandbox"])

@@ -14,6 +14,9 @@ come from three places, merged per finding:
    `{"advisory": "CVE-...", "purl": "pkg:...", "symbols": [...]}`
    (`purl` optional, version ignored).
 
+An entry may name the advisory's `sink_type` (the five static sink types),
+which lets the sandbox validate a vulnerable symbol called inside a route.
+
 Symbols are dotted names: `module.function` / `module.Class` (Python) or
 `package.Class.method` / `package.Class` (Java). An empty list means "no
 symbol metadata" and the usage engine stays at package/import level.
@@ -34,6 +37,7 @@ CURATED: list[dict] = [
         "purl": "pkg:pypi/pyyaml",
         "advisories": ["CVE-2020-14343", "CVE-2020-1747"],
         "symbols": ["yaml.load", "yaml.load_all", "yaml.full_load", "yaml.full_load_all", "yaml.FullLoader"],
+        "sink_type": "unsafe_deserialization",
         "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-14343 (FullLoader / full_load)",
     },
     {
@@ -69,6 +73,7 @@ CURATED: list[dict] = [
             "com.fasterxml.jackson.databind.ObjectMapper.enableDefaultTyping",
             "com.fasterxml.jackson.databind.ObjectMapper.activateDefaultTyping",
         ],
+        "sink_type": "unsafe_deserialization",
         "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-12384 (polymorphic default typing)",
     },
 ]
@@ -77,6 +82,7 @@ CURATED: list[dict] = [
 class VulnerableSymbolDB:
     def __init__(self, entries: list[dict] | None = None, source: str = "curated") -> None:
         self._entries: list[tuple[tuple | None, set[str], list[str], str]] = []
+        self._sink_types: list[tuple[tuple | None, set[str], str]] = []
         self.add(CURATED if entries is None else entries, source)
 
     def add(self, entries: list[dict], source: str) -> None:
@@ -87,6 +93,8 @@ class VulnerableSymbolDB:
             if not advisories or not symbols:
                 raise ValueError(f"symbol entry needs an advisory and at least one symbol: {entry!r}")
             self._entries.append((_package_key(entry.get("purl")), advisories, symbols, source))
+            if entry.get("sink_type"):
+                self._sink_types.append((_package_key(entry.get("purl")), advisories, entry["sink_type"]))
 
     @classmethod
     def with_file(cls, path: Path | None) -> "VulnerableSymbolDB":
@@ -113,6 +121,14 @@ class VulnerableSymbolDB:
             if source not in sources:
                 sources.append(source)
         return symbols, sources
+
+    def sink_type(self, finding: Finding) -> str | None:
+        advisories = {a for a in (finding.cve, finding.rule_id) if a}
+        package = _package_key(finding.purl)
+        for key, entry_advisories, sink_type in self._sink_types:
+            if advisories & entry_advisories and key in (None, package):
+                return sink_type
+        return None
 
     def symbols_for(self, finding: Finding) -> tuple[list[str], list[str]]:
         """Provider metadata already on the finding merged with this DB."""

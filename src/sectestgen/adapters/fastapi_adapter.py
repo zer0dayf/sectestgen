@@ -17,7 +17,7 @@ from typing import Iterable
 from sectestgen.core.adapters import FrameworkAdapter
 
 _HTTP_METHODS = {"get", "post", "put", "delete", "patch", "options", "head"}
-_SOURCE_MARKERS = {"Query": "query", "Path": "path", "Cookie": "cookie", "Header": "header"}
+_SOURCE_MARKERS = {"Query": "query", "Path": "path", "Cookie": "cookie", "Header": "header", "Body": "body"}
 _PATH_PARAM_RE = re.compile(r"{([^:}]+)(?::[^}]+)?}")
 _SKIP_PARAM_NAMES = {"self", "request"}
 
